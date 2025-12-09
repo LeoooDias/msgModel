@@ -19,6 +19,44 @@ from typing import Optional, Dict, Any, List
 
 
 # ============================================================================
+# CONFIGURATION - MUST BE SET BY USER
+# ============================================================================
+
+# API key files (must exist in working directory)
+OPENAI_API_KEY_FILE = 'openai-api.key'
+GEMINI_API_KEY_FILE = 'gemini-api.key'
+CLAUDE_API_KEY_FILE = 'claude-api.key'
+
+
+# ============================================================================
+# CONFIGURATION - CAN BE SET BY USER (defaults provided)
+# ============================================================================
+
+# Model selection
+OPENAI_MODEL = "gpt-4o"
+GEMINI_MODEL = "gemini-2.5-pro"
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# OpenAI specific settings
+OPENAI_TEMPERATURE = 1.0
+OPENAI_TOP_P = 1.0
+OPENAI_N = 1
+
+# Gemini specific settings
+GEMINI_TEMPERATURE = 1.0
+GEMINI_TOP_P = 0.95
+GEMINI_TOP_K = 40
+GEMINI_CANDIDATE_COUNT = 1
+GEMINI_SAFETY_THRESHOLD = "BLOCK_ONLY_HIGH"
+GEMINI_API_VERSION = "v1beta"
+
+# Claude specific settings
+CLAUDE_TEMPERATURE = 1.0
+CLAUDE_TOP_P = 0.95
+CLAUDE_TOP_K = 40
+
+
+# ============================================================================
 # OpenAI Functions
 # ============================================================================
 
@@ -43,10 +81,10 @@ def call_openai_api(
     max_tokens: int,
     system_instruction: Optional[str] = None,
     file_data: Optional[Dict[str, str]] = None,
-    temperature: float = 1.0,
-    top_p: float = 1.0,
-    n: int = 1,
-    model: str = "gpt-4o"
+    temperature: float = OPENAI_TEMPERATURE,
+    top_p: float = OPENAI_TOP_P,
+    n: int = OPENAI_N,
+    model: str = OPENAI_MODEL
 ) -> Dict[str, Any]:
     """
     Make an API call to OpenAI using the Responses API, with optional file input.
@@ -139,13 +177,13 @@ def call_gemini_api(
     gemini_max_tokens: int,
     gemini_system_instruction: Optional[Dict[str, Any]] = None,
     gemini_inline_data: Optional[Dict[str, str]] = None,
-    gemini_temperature: float = 1.0,
-    gemini_top_p: float = 0.95,
-    gemini_top_k: int = 40,
-    gemini_candidate_count: int = 1,
-    gemini_safety_threshold: str = "BLOCK_ONLY_HIGH",
-    gemini_api_version: str = "v1beta",
-    model: str = "gemini-2.5-pro"
+    gemini_temperature: float = GEMINI_TEMPERATURE,
+    gemini_top_p: float = GEMINI_TOP_P,
+    gemini_top_k: int = GEMINI_TOP_K,
+    gemini_candidate_count: int = GEMINI_CANDIDATE_COUNT,
+    gemini_safety_threshold: str = GEMINI_SAFETY_THRESHOLD,
+    gemini_api_version: str = GEMINI_API_VERSION,
+    model: str = GEMINI_MODEL
 ) -> Dict[str, Any]:
     """
     Make an API call to Google Gemini.
@@ -208,10 +246,10 @@ def call_claude_api(
     max_tokens: int,
     system_instruction: Optional[str] = None,
     inline_data: Optional[Dict[str, str]] = None,
-    temperature: float = 1.0,
-    top_p: float = 0.95,
-    top_k: int = 40,
-    model: str = "claude-sonnet-4-20250514"
+    temperature: float = CLAUDE_TEMPERATURE,
+    top_p: float = CLAUDE_TOP_P,
+    top_k: int = CLAUDE_TOP_K,
+    model: str = CLAUDE_MODEL
 ) -> Dict[str, Any]:
     """
     Make an API call to Anthropic Claude.
@@ -344,11 +382,11 @@ def main():
     
     # Read appropriate API key based on AI family
     if ai_family == 'o':
-        api_key_file = 'openai-api.key'
+        api_key_file = OPENAI_API_KEY_FILE
     elif ai_family == 'g':
-        api_key_file = 'gemini-api.key'
+        api_key_file = GEMINI_API_KEY_FILE
     else:  # ai_family == 'c'
-        api_key_file = 'claude-api.key'
+        api_key_file = CLAUDE_API_KEY_FILE
     
     try:
         with open(api_key_file, 'r') as f:
