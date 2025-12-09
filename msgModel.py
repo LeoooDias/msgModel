@@ -27,6 +27,11 @@ OPENAI_API_KEY_FILE = 'openai-api.key'
 GEMINI_API_KEY_FILE = 'gemini-api.key'
 CLAUDE_API_KEY_FILE = 'claude-api.key'
 
+# API URLs
+OPENAI_URL = "https://api.openai.com/v1/responses"
+OPENAI_FILES_URL = "https://api.openai.com/v1/files"
+GEMINI_URL = "https://generativelanguage.googleapis.com"
+CLAUDE_URL = "https://api.anthropic.com"
 
 # ============================================================================
 # CONFIGURATION - CAN BE SET BY USER (defaults provided)
@@ -62,7 +67,7 @@ CLAUDE_TOP_K = 40
 
 def upload_file_openai(api_key: str, file_path: str, purpose: str = "assistants") -> str:
     """Upload a file to OpenAI Files API and return file_id."""
-    url = "https://api.openai.com/v1/files"
+    url = OPENAI_FILES_URL
     headers = {"Authorization": f"Bearer {api_key}"}
     with open(file_path, "rb") as f:
         files = {"file": (os.path.basename(file_path), f)}
@@ -89,7 +94,7 @@ def call_openai_api(
     """
     Make an API call to OpenAI using the Responses API, with optional file input.
     """
-    url = "https://api.openai.com/v1/responses"
+    url = OPENAI_URL
     content: List[Dict[str, Any]] = []
 
     if file_data:
@@ -188,7 +193,7 @@ def call_gemini_api(
     """
     Make an API call to Google Gemini.
     """
-    url = f"https://generativelanguage.googleapis.com/{gemini_api_version}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_URL}/{gemini_api_version}/models/{model}:generateContent?key={api_key}"
     
     parts: List[Dict[str, Any]] = [{"text": gemini_user_prompt}]
     if gemini_inline_data:
