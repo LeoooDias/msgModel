@@ -44,11 +44,10 @@ from typing import Optional, Dict, Any, List
 
 
 # ============================================================================
-# CONFIGURATION - MUST BE SET BY USER
+# CONFIGURATION
 # ============================================================================
-# This section contains critical configuration that must be properly set up
-# before the script can function. Users must create API key files in the
-# working directory with valid API keys from each provider they intend to use.
+# All configuration options for the script.
+# Customize these values as needed for your use case.
 
 # API key files (must exist in working directory)
 # These files should contain only the API key string, with no extra whitespace
@@ -66,12 +65,6 @@ GEMINI_URL = "https://generativelanguage.googleapis.com"
 # Claude base URL - the anthropic library handles endpoint construction
 CLAUDE_URL = "https://api.anthropic.com"
 
-# ============================================================================
-# CONFIGURATION - CAN BE SET BY USER (defaults provided)
-# ============================================================================
-# These settings can be customized to change model behavior and response characteristics.
-# Defaults are provided that work well for most use cases.
-
 # Model selection - Specifies which specific model variant to use from each provider
 # These should be updated if newer models become available or if different capabilities are needed
 OPENAI_MODEL = "gpt-4o"  # GPT-4 Optimized - balanced performance and cost
@@ -79,19 +72,17 @@ GEMINI_MODEL = "gemini-2.5-pro"  # Latest Gemini Pro model with advanced reasoni
 CLAUDE_MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4 - balanced speed and intelligence
 
 # OpenAI specific settings
-OPENAI_TEMPERATURE = 1.0 # temperature: Controls randomness (0.0 = deterministic, 2.0 = very creative)
-OPENAI_TOP_P = 1.0 # top_p: Nucleus sampling - considers tokens with top_p probability mass (0.0-1.0)
-OPENAI_N = 1 # n: Number of completions to generate (we use 1 for single response)
+OPENAI_TEMPERATURE = 1.0  # Controls randomness (0.0 = deterministic, 2.0 = very creative)
+OPENAI_TOP_P = 1.0  # Nucleus sampling - considers tokens with top_p probability mass (0.0-1.0)
+OPENAI_N = 1  # Number of completions to generate (we use 1 for single response)
 
 # Gemini specific settings
 GEMINI_TEMPERATURE = 1.0  # Same temperature concept as OpenAI
 GEMINI_TOP_P = 0.95  # Slightly more focused than temperature=1.0
-GEMINI_TOP_K = 40 # top_k: Considers only the top k tokens for sampling (higher = more diversity)
-GEMINI_CANDIDATE_COUNT = 1 # candidate_count: Number of response variations to generate
-# safety_threshold: Content filtering level (BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE)
-GEMINI_SAFETY_THRESHOLD = "BLOCK_NONE"
-# API version: Gemini API version to use (v1beta has latest features)
-GEMINI_API_VERSION = "v1beta"
+GEMINI_TOP_K = 40  # Considers only the top k tokens for sampling (higher = more diversity)
+GEMINI_CANDIDATE_COUNT = 1  # Number of response variations to generate
+GEMINI_SAFETY_THRESHOLD = "BLOCK_NONE"  # Content filtering level (BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE)
+GEMINI_API_VERSION = "v1beta"  # Gemini API version to use (v1beta has latest features)
 
 # Claude specific settings
 CLAUDE_TEMPERATURE = 1.0  # Same temperature concept as other models
@@ -149,12 +140,12 @@ def call_openai_api(
     api_key: str,
     user_prompt: str,
     max_tokens: int,
-    system_instruction: Optional[str] = None,
-    file_data: Optional[Dict[str, str]] = None,
-    temperature: float = OPENAI_TEMPERATURE,
-    top_p: float = OPENAI_TOP_P,
-    n: int = OPENAI_N,
-    model: str = OPENAI_MODEL
+    system_instruction: Optional[str],
+    file_data: Optional[Dict[str, str]],
+    temperature: float,
+    top_p: float,
+    n: int,
+    model: str
 ) -> Dict[str, Any]:
     """
     Make an API call to OpenAI using the Responses API, with optional file input.
@@ -288,15 +279,15 @@ def call_gemini_api(
     api_key: str,
     gemini_user_prompt: str,
     gemini_max_tokens: int,
-    gemini_system_instruction: Optional[Dict[str, Any]] = None,
-    gemini_inline_data: Optional[Dict[str, str]] = None,
-    gemini_temperature: float = GEMINI_TEMPERATURE,
-    gemini_top_p: float = GEMINI_TOP_P,
-    gemini_top_k: int = GEMINI_TOP_K,
-    gemini_candidate_count: int = GEMINI_CANDIDATE_COUNT,
-    gemini_safety_threshold: str = GEMINI_SAFETY_THRESHOLD,
-    gemini_api_version: str = GEMINI_API_VERSION,
-    model: str = GEMINI_MODEL
+    gemini_system_instruction: Optional[Dict[str, Any]],
+    gemini_inline_data: Optional[Dict[str, str]],
+    gemini_temperature: float,
+    gemini_top_p: float,
+    gemini_top_k: int,
+    gemini_candidate_count: int,
+    gemini_safety_threshold: str,
+    gemini_api_version: str,
+    model: str
 ) -> Dict[str, Any]:
     """
     Make an API call to Google Gemini.
@@ -402,12 +393,12 @@ def call_claude_api(
     api_key: str,
     user_prompt: str,
     max_tokens: int,
-    system_instruction: Optional[str] = None,
-    inline_data: Optional[Dict[str, str]] = None,
-    temperature: float = CLAUDE_TEMPERATURE,
-    top_p: float = CLAUDE_TOP_P,
-    top_k: int = CLAUDE_TOP_K,
-    model: str = CLAUDE_MODEL
+    system_instruction: Optional[str],
+    inline_data: Optional[Dict[str, str]],
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    model: str
 ) -> Dict[str, Any]:
     """
     Make an API call to Anthropic Claude.
@@ -630,9 +621,13 @@ def main():
         result = call_openai_api(
             api_key=API_KEY,
             user_prompt=user_prompt_text,
+            max_tokens=max_tokens,
             system_instruction=system_instruction_text,
-            file_data=inline_data,  # May be None if no file provided
-            max_tokens=max_tokens
+            file_data=inline_data,
+            temperature=OPENAI_TEMPERATURE,
+            top_p=OPENAI_TOP_P,
+            n=OPENAI_N,
+            model=OPENAI_MODEL
         )
         
         # Extract and display the response text from OpenAI's response structure
@@ -663,9 +658,16 @@ def main():
         result = call_gemini_api(
             api_key=API_KEY,
             gemini_user_prompt=user_prompt_text,
-            gemini_system_instruction={"parts": [{"text": system_instruction_text}]},  # Gemini format
-            gemini_inline_data=inline_data,  # May be None if no file provided
-            gemini_max_tokens=max_tokens
+            gemini_max_tokens=max_tokens,
+            gemini_system_instruction={"parts": [{"text": system_instruction_text}]},
+            gemini_inline_data=inline_data,
+            gemini_temperature=GEMINI_TEMPERATURE,
+            gemini_top_p=GEMINI_TOP_P,
+            gemini_top_k=GEMINI_TOP_K,
+            gemini_candidate_count=GEMINI_CANDIDATE_COUNT,
+            gemini_safety_threshold=GEMINI_SAFETY_THRESHOLD,
+            gemini_api_version=GEMINI_API_VERSION,
+            model=GEMINI_MODEL
         )
         
         # Check for binary outputs in Gemini response
@@ -699,9 +701,13 @@ def main():
         result = call_claude_api(
             api_key=API_KEY,
             user_prompt=user_prompt_text,
+            max_tokens=max_tokens,
             system_instruction=system_instruction_text,
-            inline_data=inline_data,  # May be None if no file provided
-            max_tokens=max_tokens
+            inline_data=inline_data,
+            temperature=CLAUDE_TEMPERATURE,
+            top_p=CLAUDE_TOP_P,
+            top_k=CLAUDE_TOP_K,
+            model=CLAUDE_MODEL
         )
     
     # Print the complete JSON response from the API

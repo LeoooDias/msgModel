@@ -115,21 +115,38 @@ Summarize this report in no more than 5 sentences, to a national healthcare poli
 
 ## Configuration
 
-You can customize the following settings in `msgModel.py`:
+All configuration options are defined at the top of `msgModel.py` in a single unified CONFIGURATION section. To customize behavior, modify these constants:
+
+### API Configuration
+- `OPENAI_API_KEY_FILE` - default: `'openai-api.key'`
+- `GEMINI_API_KEY_FILE` - default: `'gemini-api.key'`
+- `CLAUDE_API_KEY_FILE` - default: `'claude-api.key'`
+- `OPENAI_URL`, `OPENAI_FILES_URL`, `GEMINI_URL`, `CLAUDE_URL` - API endpoints
 
 ### Model Selection
 - `OPENAI_MODEL` - default: `"gpt-4o"`
 - `GEMINI_MODEL` - default: `"gemini-2.5-pro"`
 - `CLAUDE_MODEL` - default: `"claude-sonnet-4-20250514"`
 
-### Generation Parameters
-Each provider has configurable temperature, top_p, and top_k values. Modify the constants at the top of the script:
-- `OPENAI_TEMPERATURE`, `OPENAI_TOP_P`
-- `GEMINI_TEMPERATURE`, `GEMINI_TOP_P`, `GEMINI_TOP_K`
-- `CLAUDE_TEMPERATURE`, `CLAUDE_TOP_P`, `CLAUDE_TOP_K`
+### OpenAI Parameters
+- `OPENAI_TEMPERATURE` - default: `1.0`
+- `OPENAI_TOP_P` - default: `1.0`
+- `OPENAI_N` - default: `1`
 
-### Safety Settings (Gemini)
+### Gemini Parameters
+- `GEMINI_TEMPERATURE` - default: `1.0`
+- `GEMINI_TOP_P` - default: `0.95`
+- `GEMINI_TOP_K` - default: `40`
+- `GEMINI_CANDIDATE_COUNT` - default: `1`
 - `GEMINI_SAFETY_THRESHOLD` - default: `"BLOCK_NONE"`
+- `GEMINI_API_VERSION` - default: `"v1beta"`
+
+### Claude Parameters
+- `CLAUDE_TEMPERATURE` - default: `1.0`
+- `CLAUDE_TOP_P` - default: `0.95`
+- `CLAUDE_TOP_K` - default: `40`
+
+**Note**: All configuration values are required and used explicitly throughout the script. The functions do not assume any default values - all parameters are passed from the configuration constants.
 
 ## Supported File Types
 
