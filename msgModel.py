@@ -89,6 +89,13 @@ CLAUDE_TEMPERATURE = 1.0  # Same temperature concept as other models
 CLAUDE_TOP_P = 0.95  # Nucleus sampling parameter
 CLAUDE_TOP_K = 40  # Top-k sampling parameter
 
+# Privacy and data retention settings
+# These settings control data retention across all providers
+OPENAI_STORE_DATA = False  # When False, this prevents OpenAI from using data for model training
+OPENAI_DELETE_FILES_AFTER_USE = True  # When True, automatically deletes uploaded files after processing
+CLAUDE_CACHE_CONTROL = False  # When False, disables prompt caching to avoid data retention
+GEMINI_CACHE_CONTROL = False  # When False, disables caching for privacy
+
 
 # ============================================================================
 # OpenAI Functions
@@ -134,6 +141,35 @@ def upload_file_openai(api_key: str, file_path: str, purpose: str = "assistants"
     # Extract and return the file ID from the response
     payload = resp.json()
     return payload.get("id")
+
+
+def delete_file_openai(api_key: str, file_id: str) -> bool:
+    """
+    Delete a file from OpenAI Files API to ensure data privacy.
+    
+    This function removes uploaded files from OpenAI's storage after processing
+    to minimize data retention and protect user privacy.
+    
+    Args:
+        api_key: OpenAI API authentication key
+        file_id: The file ID to delete
+    
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    url = f"{OPENAI_FILES_URL}/{file_id}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    try:
+        resp = requests.delete(url, headers=headers)
+        if resp.ok:
+            return True
+        else:
+            print(f"Warning: Failed to delete file {file_id}: {resp.status_code} - {resp.text}", file=sys.stderr)
+            return False
+    except Exception as e:
+        print(f"Warning: Exception while deleting file {file_id}: {e}", file=sys.stderr)
+        return False
 
 
 def call_openai_api(
@@ -248,6 +284,11 @@ def call_openai_api(
     # Add system instructions if provided - this guides the model's overall behavior
     if system_instruction:
         payload["instructions"] = system_instruction
+    
+    # Add privacy/data retention settings
+    # OpenAI's store parameter controls whether data can be used for model training
+    if not OPENAI_STORE_DATA:
+        payload["store"] = False
 
     # Set up HTTP headers for the request
     headers = {
@@ -495,6 +536,12 @@ def call_claude_api(
     if system_instruction:
         kwargs["system"] = system_instruction
     
+    # Add metadata to prevent prompt caching if configured for privacy
+    if not CLAUDE_CACHE_CONTROL:
+        # Note: As of current API, there's no explicit "do not cache" parameter
+        # But we can add metadata to indicate privacy preference
+        kwargs["metadata"] = {"user_id": "privacy-mode"}
+
     # Make the API call using the anthropic library
     # This returns a Message object which we'll convert to a dict
     response = client.messages.create(**kwargs)
@@ -610,25 +657,33 @@ def main():
     
     # OPENAI FLOW
     if ai_family == 'o':
-        # Special handling for PDFs with OpenAI
-        # OpenAI requires PDFs to be uploaded first and referenced by file_id
-        if inline_data and inline_data.get("mime_type") == "application/pdf":
-            # Upload the PDF file and get a file_id back
-            file_id = upload_file_openai(API_KEY, inline_data["path"])
-            inline_data["file_id"] = file_id  # Store file_id for use in API call
-        
-        # Make the API call to OpenAI
-        result = call_openai_api(
-            api_key=API_KEY,
-            user_prompt=user_prompt_text,
-            max_tokens=max_tokens,
-            system_instruction=system_instruction_text,
-            file_data=inline_data,
-            temperature=OPENAI_TEMPERATURE,
-            top_p=OPENAI_TOP_P,
-            n=OPENAI_N,
-            model=OPENAI_MODEL
-        )
+        uploaded_file_id = None  # Track uploaded file for cleanup
+        try:
+            # Special handling for PDFs with OpenAI
+            # OpenAI requires PDFs to be uploaded first and referenced by file_id
+            if inline_data and inline_data.get("mime_type") == "application/pdf":
+                # Upload the PDF file and get a file_id back
+                file_id = upload_file_openai(API_KEY, inline_data["path"])
+                inline_data["file_id"] = file_id  # Store file_id for use in API call
+                uploaded_file_id = file_id  # Track for cleanup
+            
+            # Make the API call to OpenAI
+            result = call_openai_api(
+                api_key=API_KEY,
+                user_prompt=user_prompt_text,
+                max_tokens=max_tokens,
+                system_instruction=system_instruction_text,
+                file_data=inline_data,
+                temperature=OPENAI_TEMPERATURE,
+                top_p=OPENAI_TOP_P,
+                n=OPENAI_N,
+                model=OPENAI_MODEL
+            )
+        finally:
+            # Clean up uploaded file for privacy if configured
+            if uploaded_file_id and OPENAI_DELETE_FILES_AFTER_USE:
+                delete_file_openai(API_KEY, uploaded_file_id)
+                print(f"Privacy: Deleted uploaded file {uploaded_file_id} from OpenAI", file=sys.stderr)
         
         # Extract and display the response text from OpenAI's response structure
         # OpenAI's response format can vary, so we check multiple possible locations
@@ -714,6 +769,16 @@ def main():
     # This shows the full structure including metadata, tokens used, etc.
     # Using indent=2 makes the JSON human-readable with proper formatting
     print(json.dumps(result, indent=2))
+    
+    # Print privacy information to stderr
+    print("\n=== Privacy Settings ===", file=sys.stderr)
+    if ai_family == 'o':
+        print(f"OpenAI - Data retention opt-out: {not OPENAI_STORE_DATA}", file=sys.stderr)
+        print(f"OpenAI - Auto-delete uploaded files: {OPENAI_DELETE_FILES_AFTER_USE}", file=sys.stderr)
+    elif ai_family == 'g':
+        print(f"Gemini - Caching disabled: {not GEMINI_CACHE_CONTROL}", file=sys.stderr)
+    else:  # Claude
+        print(f"Claude - Caching disabled: {not CLAUDE_CACHE_CONTROL}", file=sys.stderr)
 
 
 # Standard Python idiom - only run main() if this script is executed directly

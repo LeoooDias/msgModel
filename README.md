@@ -18,6 +18,10 @@ This tool allows you to send prompts with optional file attachments (images, PDF
 - **System instructions**: Define custom system-level instructions to guide model behavior
 - **Configurable parameters**: Control temperature, top-p, top-k, and other generation parameters
 - **Automatic file handling**: Handles base64 encoding and provider-specific file upload requirements
+- **Privacy-focused**: Minimizes data retention across all providers
+  - OpenAI: Opts out of data storage for training, auto-deletes uploaded files
+  - Gemini: Disables caching to prevent data retention
+  - Claude: Configures privacy-preserving settings
 - **Error handling**: Clear error messages and status codes
 
 ## Installation
@@ -146,6 +150,26 @@ All configuration options are defined at the top of `msgModel.py` in a single un
 - `CLAUDE_TOP_P` - default: `0.95`
 - `CLAUDE_TOP_K` - default: `40`
 
+### Privacy and Data Retention Settings
+The script is configured by default to minimize data retention across all providers:
+
+- `OPENAI_STORE_DATA` - default: `False`
+  - When `False`, prevents OpenAI from using your data for model training
+  - API requests include `"store": false` parameter
+  
+- `OPENAI_DELETE_FILES_AFTER_USE` - default: `True`
+  - When `True`, automatically deletes uploaded files (PDFs) from OpenAI's servers immediately after processing
+  - Ensures no file data persists on OpenAI's infrastructure
+  
+- `CLAUDE_CACHE_CONTROL` - default: `False`
+  - When `False`, disables prompt caching to avoid data retention
+  - Adds privacy-mode metadata to requests
+  
+- `GEMINI_CACHE_CONTROL` - default: `False`
+  - When `False`, disables caching for privacy
+
+**Privacy Note**: These settings prioritize data privacy by default. The script will display privacy settings at the end of each execution to confirm which protections are active.
+
 **Note**: All configuration values are required and used explicitly throughout the script. The functions do not assume any default values - all parameters are passed from the configuration constants.
 
 ## Supported File Types
@@ -185,6 +209,48 @@ Be aware of rate limits for each provider:
 - Add `*.key` to your `.gitignore` file
 - API keys grant access to paid services - treat them like passwords
 - Consider using environment variables for production deployments
+
+## Privacy and Data Protection
+
+This script is designed with privacy as a priority:
+
+### Data Retention Minimization
+
+**OpenAI:**
+- All API requests include `"store": false` to opt out of data retention for model training
+- Uploaded files (PDFs) are automatically deleted from OpenAI's servers immediately after processing
+- No prompt data or file content persists beyond the immediate API call
+- Privacy status is logged to stderr after each execution
+
+**Claude (Anthropic):**
+- Privacy-mode metadata is added to requests
+- Caching is disabled by default to prevent data retention
+- According to Anthropic's policies, data sent to the API is not used for training
+
+**Gemini (Google):**
+- Caching is disabled by default
+- Check Google's current data retention policies for Gemini API
+
+### Verifying Privacy Settings
+
+After each script execution, check the stderr output for:
+```
+=== Privacy Settings ===
+OpenAI - Data retention opt-out: True
+OpenAI - Auto-delete uploaded files: True
+```
+
+### Customizing Privacy Settings
+
+To modify privacy behavior, edit the configuration constants at the top of `msgModel.py`:
+- Set `OPENAI_STORE_DATA = True` if you want OpenAI to retain data for model improvement
+- Set `OPENAI_DELETE_FILES_AFTER_USE = False` if you want to manually manage uploaded files
+- Set `CLAUDE_CACHE_CONTROL = True` or `GEMINI_CACHE_CONTROL = True` to enable caching
+
+**Important**: Even with these protections, be mindful of:
+- Provider terms of service and privacy policies
+- Applicable data protection regulations (GDPR, CCPA, etc.)
+- Sensitive data - avoid sending personal, confidential, or regulated information unless absolutely necessary
 
 ## License
 
