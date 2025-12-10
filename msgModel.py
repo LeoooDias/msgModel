@@ -118,9 +118,12 @@ GEMINI_URL = "https://generativelanguage.googleapis.com"
 CLAUDE_URL = "https://api.anthropic.com"
 
 # Model selection - Specifies which specific model variant to use from each provider
-OPENAI_MODEL = "gpt-4o"
-GEMINI_MODEL = "gemini-2.5-pro"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+# OpenAI - See options at https://platform.openai.com/docs/models
+OPENAI_MODEL = "gpt-5-nano"                 
+# Gemini - See options at https://ai.google.dev/gemini-api/docs/models
+GEMINI_MODEL = "gemini-2.5-flash"             
+# Claude - See options at https://platform.claude.com/docs/en/about-claude/models/overview 
+CLAUDE_MODEL = "claude-sonnet-4-20250514"   
 
 # OpenAI specific settings
 OPENAI_TEMPERATURE = 1.0
