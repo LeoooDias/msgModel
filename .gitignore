@@ -35,3 +35,7 @@ ENV/
 # Environment variables (to protect API keys)
 .env
 *.key
+
+# Prompts and personas
+*.prompt
+*.persona
