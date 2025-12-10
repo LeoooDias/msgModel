@@ -79,22 +79,17 @@ GEMINI_MODEL = "gemini-2.5-pro"  # Latest Gemini Pro model with advanced reasoni
 CLAUDE_MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4 - balanced speed and intelligence
 
 # OpenAI specific settings
-# temperature: Controls randomness (0.0 = deterministic, 2.0 = very creative)
-OPENAI_TEMPERATURE = 1.0
-# top_p: Nucleus sampling - considers tokens with top_p probability mass (0.0-1.0)
-OPENAI_TOP_P = 1.0
-# n: Number of completions to generate (we use 1 for single response)
-OPENAI_N = 1
+OPENAI_TEMPERATURE = 1.0 # temperature: Controls randomness (0.0 = deterministic, 2.0 = very creative)
+OPENAI_TOP_P = 1.0 # top_p: Nucleus sampling - considers tokens with top_p probability mass (0.0-1.0)
+OPENAI_N = 1 # n: Number of completions to generate (we use 1 for single response)
 
 # Gemini specific settings
 GEMINI_TEMPERATURE = 1.0  # Same temperature concept as OpenAI
 GEMINI_TOP_P = 0.95  # Slightly more focused than temperature=1.0
-# top_k: Considers only the top k tokens for sampling (higher = more diversity)
-GEMINI_TOP_K = 40
-# candidate_count: Number of response variations to generate
-GEMINI_CANDIDATE_COUNT = 1
+GEMINI_TOP_K = 40 # top_k: Considers only the top k tokens for sampling (higher = more diversity)
+GEMINI_CANDIDATE_COUNT = 1 # candidate_count: Number of response variations to generate
 # safety_threshold: Content filtering level (BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE)
-GEMINI_SAFETY_THRESHOLD = "BLOCK_ONLY_HIGH"
+GEMINI_SAFETY_THRESHOLD = "BLOCK_NONE"
 # API version: Gemini API version to use (v1beta has latest features)
 GEMINI_API_VERSION = "v1beta"
 
