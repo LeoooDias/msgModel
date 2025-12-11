@@ -46,8 +46,8 @@ pip install msgmodel[all]
 
 ```bash
 # Clone the repository
-git clone https://github.com/LeoooDias/msgModel.git
-cd msgModel
+git clone https://github.com/LeoooDias/msgmodel.git
+cd msgmodel
 
 # Install the package
 pip install -e .
@@ -101,6 +101,7 @@ python -m msgmodel -p openai "What is Python?"
 # Using shorthand provider codes
 python -m msgmodel -p g "Hello, Gemini!"  # g = gemini
 python -m msgmodel -p c "Hello, Claude!"  # c = claude
+python -m msgmodel -p o "Hello, OpenAI!"  # o = openai
 
 # With streaming
 python -m msgmodel -p openai "Tell me a story" --stream
@@ -291,5 +292,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Author
 
-Leo Dias
+Leo Dias (but mostly AI)
   
