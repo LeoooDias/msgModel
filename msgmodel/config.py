@@ -58,7 +58,7 @@ class Provider(str, Enum):
 # ============================================================================
 # API URLs (constants, not configurable per-request)
 # ============================================================================
-OPENAI_URL = "https://api.openai.com/v1/messages"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 OPENAI_FILES_URL = "https://api.openai.com/v1/files"
 GEMINI_URL = "https://generativelanguage.googleapis.com"
 CLAUDE_URL = "https://api.anthropic.com"
