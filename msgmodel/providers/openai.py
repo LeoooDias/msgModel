@@ -286,6 +286,7 @@ class OpenAIProvider:
                 response_text=response.text
             )
         
+        chunks_received = 0
         try:
             for line in response.iter_lines():
                 if line:
@@ -300,14 +301,23 @@ class OpenAIProvider:
                             if "delta" in chunk:
                                 delta = chunk["delta"]
                                 if isinstance(delta, dict) and "text" in delta:
-                                    yield delta["text"]
+                                    text = delta["text"]
+                                    if text:
+                                        chunks_received += 1
+                                        yield text
                             elif "output" in chunk:
                                 for item in chunk.get("output", []):
                                     for c in item.get("content", []):
                                         if c.get("type") == "output_text":
-                                            yield c.get("text", "")
+                                            text = c.get("text", "")
+                                            if text:
+                                                chunks_received += 1
+                                                yield text
                         except json.JSONDecodeError:
                             continue
+            
+            if chunks_received == 0:
+                logger.error(f"No text chunks extracted from streaming response. Check that the API endpoint is correct and the response format is valid.")
         except Exception as e:
             raise StreamingError(f"Streaming interrupted: {e}")
     
