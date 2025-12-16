@@ -170,19 +170,22 @@ class OpenAIProvider:
         file_data: Optional[Dict[str, Any]] = None,
         stream: bool = False
     ) -> Dict[str, Any]:
-        """Build the API request payload for OpenAI Messages API."""
+        """Build the API request payload for OpenAI Chat Completions API."""
         content = self._build_content(prompt, file_data)
+        
+        # Build messages array with system message first (if provided)
+        messages: List[Dict[str, Any]] = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": content})
         
         payload: Dict[str, Any] = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": content}],
+            "messages": messages,
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
         }
-        
-        if system_instruction:
-            payload["system"] = system_instruction
         
         if stream:
             payload["stream"] = True
