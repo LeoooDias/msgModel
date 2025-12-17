@@ -121,13 +121,102 @@ def _get_api_key(
     )
 
 
-def _prepare_file_like_data(file_like: io.BytesIO, filename: str = "upload.bin") -> Dict[str, Any]:
+def _infer_mime_type(file_like: io.BytesIO, filename: Optional[str] = None) -> str:
+    """
+    Infer MIME type from filename or file content with fallback magic byte detection.
+    
+    v3.2.1 Enhancement: Detects MIME type using multiple strategies:
+    1. Filename-based detection (fastest, most reliable)
+    2. Magic byte detection (fallback for files without extensions)
+    3. Safe default (application/octet-stream)
+    
+    Args:
+        file_like: BytesIO object to inspect
+        filename: Optional filename hint for MIME type detection
+        
+    Returns:
+        MIME type string (e.g., 'image/png', 'application/pdf')
+    """
+    # Strategy 1: Try filename-based detection
+    if filename:
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type:
+            return mime_type
+    
+    # Strategy 2: Magic byte detection for common file formats
+    try:
+        current_pos = file_like.tell()
+        file_like.seek(0)
+        magic_bytes = file_like.read(512)
+        file_like.seek(current_pos)
+        
+        # Magic byte signatures for common formats
+        signatures = {
+            b'%PDF': 'application/pdf',
+            b'\x89PNG\r\n\x1a\n': 'image/png',
+            b'\xff\xd8\xff': 'image/jpeg',
+            b'GIF8': 'image/gif',
+            b'BM': 'image/bmp',
+            b'RIFF': 'audio/wav',
+            b'ID3': 'audio/mpeg',
+            b'PK\x03\x04': 'application/zip',
+            b'\x50\x4b\x03\x04': 'application/zip',
+            b'\xef\xbb\xbf<?xml': 'application/xml',
+            b'<?xml': 'application/xml',
+        }
+        
+        for sig, mime_type in signatures.items():
+            if magic_bytes.startswith(sig):
+                return mime_type
+    except (AttributeError, IOError):
+        pass
+    
+    # Strategy 3: Safe default
+    return MIME_TYPE_OCTET_STREAM
+
+
+def _prepare_file_data(file_path: str) -> Dict[str, Any]:
+    """
+    Prepare file data from disk for API submission.
+    
+    Args:
+        file_path: Path to the file on disk
+        
+    Returns:
+        Dictionary containing file metadata and encoded data
+        
+    Raises:
+        FileError: If the file cannot be read
+    """
+    try:
+        path = Path(file_path)
+        with open(path, "rb") as f:
+            binary_content = f.read()
+    except (FileNotFoundError, IOError, OSError) as e:
+        raise FileError(f"Failed to read file {file_path}: {e}")
+    
+    # Use improved MIME type inference with fallback
+    mime_type = _infer_mime_type(io.BytesIO(binary_content), filename=Path(file_path).name)
+    
+    encoded_data = base64.b64encode(binary_content).decode("utf-8")
+    
+    return {
+        "mime_type": mime_type,
+        "data": encoded_data,
+        "filename": Path(file_path).name,
+        "is_file_like": False,  # Mark as disk file
+    }
+
+
+def _prepare_file_like_data(file_like: io.BytesIO, filename: Optional[str] = None) -> Dict[str, Any]:
     """
     Prepare file-like object data for API submission.
     
     Processes a BytesIO object entirely in memory (never touches disk).
-    This is the only supported method for file upload in msgmodel v3.2.0+
+    This is the only supported method for file upload in msgmodel v3.2.1+
     to ensure privacy and stateless operation.
+    
+    v3.2.1 Enhancement: Includes improved MIME type inference with magic byte fallback.
     
     Args:
         file_like: An io.BytesIO object containing binary data
@@ -148,17 +237,15 @@ def _prepare_file_like_data(file_like: io.BytesIO, filename: str = "upload.bin")
     except (AttributeError, IOError, OSError) as e:
         raise FileError(f"Failed to read from file-like object: {e}")
     
-    # Try to guess MIME type from filename, default to octet-stream
-    mime_type, _ = mimetypes.guess_type(filename)
-    if not mime_type:
-        mime_type = MIME_TYPE_OCTET_STREAM
+    # v3.2.1: Use improved MIME type inference with fallback
+    mime_type = _infer_mime_type(file_like, filename)
     
     encoded_data = base64.b64encode(binary_content).decode("utf-8")
     
     return {
         "mime_type": mime_type,
         "data": encoded_data,
-        "filename": filename,
+        "filename": filename or "upload.bin",
         "is_file_like": True,  # Mark as in-memory file
     }
 
@@ -305,6 +392,8 @@ def stream(
     max_tokens: Optional[int] = None,
     model: Optional[str] = None,
     temperature: Optional[float] = None,
+    timeout: float = 300,
+    on_chunk: Optional[Any] = None,
 ) -> Iterator[str]:
     """
     Stream a response from an LLM provider.
@@ -325,6 +414,8 @@ def stream(
         max_tokens: Override for max tokens (convenience parameter)
         model: Override for model (convenience parameter)
         temperature: Override for temperature (convenience parameter)
+        timeout: Timeout in seconds for streaming connection (default: 300s/5min). v3.2.1+
+        on_chunk: Optional callback(chunk) -> bool. Return False to abort stream. v3.2.1+
     
     Yields:
         Text chunks as they arrive from the API
@@ -403,12 +494,12 @@ def stream(
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
         prov = OpenAIProvider(key, config)
-        yield from prov.stream(prompt, system_instruction, file_data)
+        yield from prov.stream(prompt, system_instruction, file_data, timeout=timeout, on_chunk=on_chunk)
         
     elif provider == Provider.GEMINI:
         assert isinstance(config, GeminiConfig)
         prov = GeminiProvider(key, config)
-        yield from prov.stream(prompt, system_instruction, file_data)
+        yield from prov.stream(prompt, system_instruction, file_data, timeout=timeout, on_chunk=on_chunk)
     
     else:
         # Should never reach here due to Provider enum, but maintain type safety

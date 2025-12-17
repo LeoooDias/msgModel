@@ -11,12 +11,12 @@ import logging
 import mimetypes as mime_module
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Iterator
+from typing import Optional, Dict, Any, List, Iterator, Callable
 
 import requests
 
 from ..config import GeminiConfig, GEMINI_URL
-from ..exceptions import APIError, StreamingError
+from ..exceptions import APIError, StreamingError, ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -202,22 +202,28 @@ class GeminiProvider:
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        file_data: Optional[Dict[str, Any]] = None
+        file_data: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        on_chunk: Optional[Callable[[str], bool]] = None
     ) -> Iterator[str]:
         """
         Make a streaming API call to Gemini.
+        
+        v3.2.1 Enhancement: Adds timeout support and optional abort callback.
         
         Args:
             prompt: The user prompt
             system_instruction: Optional system instruction
             file_data: Optional file data dict
+            timeout: Timeout in seconds for the streaming connection (default: 300s/5min)
+            on_chunk: Optional callback that receives each chunk. Return False to abort stream.
             
         Yields:
             Text chunks as they arrive
             
         Raises:
             APIError: If the API call fails
-            StreamingError: If streaming fails
+            StreamingError: If streaming fails or timeout occurs
         """
         url = self._build_url(stream=True)
         payload = self._build_payload(prompt, system_instruction, file_data)
@@ -228,8 +234,11 @@ class GeminiProvider:
                 url,
                 headers=headers,
                 data=json.dumps(payload),
-                stream=True
+                stream=True,
+                timeout=timeout
             )
+        except requests.Timeout:
+            raise StreamingError(f"Gemini streaming request timed out after {timeout} seconds")
         except requests.RequestException as e:
             raise APIError(f"Request failed: {e}")
         
@@ -250,6 +259,11 @@ class GeminiProvider:
                             chunk = json.loads(data)
                             text = self.extract_text(chunk)
                             if text:
+                                # v3.2.1: Support abort callback
+                                if on_chunk is not None:
+                                    should_continue = on_chunk(text)
+                                    if should_continue is False:
+                                        return
                                 yield text
                         except json.JSONDecodeError:
                             continue

@@ -22,7 +22,7 @@ With custom configuration:
     >>> response = query("openai", "Hello!", config=config)
 """
 
-__version__ = "3.2.0"
+__version__ = "3.2.1"
 __author__ = "Leo Dias"
 
 # Core API
@@ -50,6 +50,9 @@ from .exceptions import (
 # Providers (for advanced usage)
 from .providers import OpenAIProvider, GeminiProvider
 
+# Security (v3.2.1+)
+from .security import RequestSigner
+
 __all__ = [
     # Version
     "__version__",
@@ -73,4 +76,6 @@ __all__ = [
     # Providers
     "OpenAIProvider",
     "GeminiProvider",
+    # Security
+    "RequestSigner",
 ]

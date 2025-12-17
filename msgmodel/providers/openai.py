@@ -19,7 +19,7 @@ FILE UPLOADS:
 import json
 import base64
 import logging
-from typing import Optional, Dict, Any, Iterator, List
+from typing import Optional, Dict, Any, Iterator, List, Callable
 
 import requests
 
@@ -118,6 +118,44 @@ class OpenAIProvider:
         
         return content
     
+    def _supports_max_completion_tokens(self, model_name: str) -> bool:
+        """
+        Check if model supports max_completion_tokens (GPT-4o and later).
+        
+        Newer OpenAI models (GPT-4o, GPT-4 Turbo) use max_completion_tokens instead of max_tokens.
+        Legacy models still use max_tokens.
+        
+        Args:
+            model_name: The model identifier
+            
+        Returns:
+            True if model uses max_completion_tokens, False if it uses max_tokens
+        """
+        # Models that support max_completion_tokens (newer OpenAI models)
+        new_models = [
+            "gpt-4o",
+            "gpt-4-turbo",
+            "gpt-4-turbo-preview",
+            "gpt-4-turbo-2024",
+        ]
+        
+        # Models that only support max_tokens (legacy)
+        legacy_models = [
+            "gpt-3.5-turbo",
+            "gpt-4",
+            "gpt-4-0613",
+            "gpt-4-0125-preview",
+            "gpt-4-1106-preview",
+        ]
+        
+        # Check for exact match or prefix match for new models
+        for new_model in new_models:
+            if model_name == new_model or model_name.startswith(new_model):
+                return True
+        
+        # Default: use legacy max_tokens for safety
+        return False
+    
     def _build_payload(
         self,
         prompt: str,
@@ -137,10 +175,16 @@ class OpenAIProvider:
         payload: Dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
-            "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
         }
+        
+        # Use appropriate max tokens parameter based on model version
+        # v3.2.1: Support both max_tokens (legacy) and max_completion_tokens (GPT-4o+)
+        if self._supports_max_completion_tokens(self.config.model):
+            payload["max_completion_tokens"] = self.config.max_tokens
+        else:
+            payload["max_tokens"] = self.config.max_tokens
         
         if stream:
             payload["stream"] = True
@@ -196,7 +240,9 @@ class OpenAIProvider:
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        file_data: Optional[Dict[str, Any]] = None
+        file_data: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        on_chunk: Optional[Callable[[str], bool]] = None
     ) -> Iterator[str]:
         """
         Make a streaming API call to OpenAI.
@@ -205,17 +251,21 @@ class OpenAIProvider:
         via the X-OpenAI-No-Store header, ensuring OpenAI does not store this interaction
         for service improvements.
         
+        v3.2.1 Enhancement: Adds timeout support and optional abort callback.
+        
         Args:
             prompt: The user prompt
             system_instruction: Optional system instruction
             file_data: Optional file data dict
+            timeout: Timeout in seconds for the streaming connection (default: 300s/5min)
+            on_chunk: Optional callback that receives each chunk. Return False to abort stream.
             
         Yields:
             Text chunks as they arrive
             
         Raises:
             APIError: If the API call fails
-            StreamingError: If streaming fails
+            StreamingError: If streaming fails or timeout occurs
         """
         payload = self._build_payload(prompt, system_instruction, file_data, stream=True)
         headers = self._build_headers()
@@ -225,8 +275,11 @@ class OpenAIProvider:
                 OPENAI_URL,
                 headers=headers,
                 data=json.dumps(payload),
-                stream=True
+                stream=True,
+                timeout=timeout
             )
+        except requests.Timeout:
+            raise StreamingError(f"OpenAI streaming request timed out after {timeout} seconds")
         except requests.RequestException as e:
             raise APIError(f"Request failed: {e}")
         
@@ -258,6 +311,11 @@ class OpenAIProvider:
                                             text = delta.get("content", "")
                                             if text:
                                                 chunks_received += 1
+                                                # v3.2.1: Support abort callback
+                                                if on_chunk is not None:
+                                                    should_continue = on_chunk(text)
+                                                    if should_continue is False:
+                                                        return
                                                 yield text
                         except json.JSONDecodeError:
                             continue
