@@ -20,15 +20,12 @@ from .config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
-    ClaudeConfig,
     ProviderConfig,
     get_default_config,
     OPENAI_API_KEY_ENV,
     GEMINI_API_KEY_ENV,
-    CLAUDE_API_KEY_ENV,
     OPENAI_API_KEY_FILE,
     GEMINI_API_KEY_FILE,
-    CLAUDE_API_KEY_FILE,
 )
 from .exceptions import (
     MsgModelError,
@@ -39,7 +36,6 @@ from .exceptions import (
 )
 from .providers.openai import OpenAIProvider
 from .providers.gemini import GeminiProvider
-from .providers.claude import ClaudeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -97,16 +93,13 @@ def _get_api_key(
     env_vars = {
         Provider.OPENAI: OPENAI_API_KEY_ENV,
         Provider.GEMINI: GEMINI_API_KEY_ENV,
-        Provider.CLAUDE: CLAUDE_API_KEY_ENV,
     }
     
     key_files = {
         Provider.OPENAI: OPENAI_API_KEY_FILE,
         Provider.GEMINI: GEMINI_API_KEY_FILE,
-        Provider.CLAUDE: CLAUDE_API_KEY_FILE,
     }
     
-    # Try environment variable
     env_var = env_vars[provider]
     key = os.environ.get(env_var)
     if key:
@@ -128,48 +121,13 @@ def _get_api_key(
     )
 
 
-def _prepare_file_data(file_path: str) -> Dict[str, Any]:
-    """
-    Prepare file data for API submission.
-    
-    Args:
-        file_path: Path to the file
-        
-    Returns:
-        Dictionary containing file metadata and encoded data
-        
-    Raises:
-        FileError: If the file cannot be read
-    """
-    path = Path(file_path)
-    
-    if not path.exists():
-        raise FileError(f"File not found: {file_path}")
-    
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if not mime_type:
-        mime_type = MIME_TYPE_OCTET_STREAM
-    
-    try:
-        with open(file_path, "rb") as f:
-            binary_content = f.read()
-            encoded_data = base64.b64encode(binary_content).decode("utf-8")
-    except IOError as e:
-        raise FileError(f"Failed to read file {file_path}: {e}")
-    
-    return {
-        "mime_type": mime_type,
-        "data": encoded_data,
-        "filename": path.name,
-        "path": file_path,
-    }
-
-
 def _prepare_file_like_data(file_like: io.BytesIO, filename: str = "upload.bin") -> Dict[str, Any]:
     """
     Prepare file-like object data for API submission.
     
     Processes a BytesIO object entirely in memory (never touches disk).
+    This is the only supported method for file upload in msgmodel v3.2.0+
+    to ensure privacy and stateless operation.
     
     Args:
         file_like: An io.BytesIO object containing binary data
@@ -218,7 +176,6 @@ def query(
     prompt: str,
     api_key: Optional[str] = None,
     system_instruction: Optional[str] = None,
-    file_path: Optional[str] = None,
     file_like: Optional[io.BytesIO] = None,
     filename: Optional[str] = None,
     config: Optional[ProviderConfig] = None,
@@ -233,12 +190,14 @@ def query(
     interface to all supported LLM providers.
     
     Args:
-        provider: The LLM provider ('openai', 'gemini', 'claude', or 'o', 'g', 'c')
+        provider: The LLM provider ('openai' or 'gemini', or 'o', 'g')
         prompt: The user prompt text
         api_key: API key (optional if set via env var or file)
         system_instruction: Optional system instruction/prompt
-        file_path: Optional path to a file (image, PDF, etc.)
         file_like: Optional file-like object (io.BytesIO) - must be seekable
+            This is the only method for file upload. Files are base64-encoded
+            and embedded in prompts for privacy and stateless operation.
+            Limited to practical API constraints (~15-20MB for OpenAI, ~22MB for Gemini).
         filename: Optional filename hint for MIME type detection when using file_like.
             If not provided, attempts to use file_like.name attribute. Defaults to 'upload.bin'
         config: Optional provider-specific configuration object
@@ -250,7 +209,7 @@ def query(
         LLMResponse containing the text response and metadata
     
     Raises:
-        ConfigurationError: For invalid configuration or file conflicts
+        ConfigurationError: For invalid configuration
         AuthenticationError: For API key issues
         FileError: For file-related issues
         APIError: For API call failures
@@ -259,9 +218,6 @@ def query(
         >>> # Simple query with env var API key
         >>> response = query("openai", "Hello, world!")
         >>> print(response.text)
-        
-        >>> # Query with file attachment from disk
-        >>> response = query("gemini", "Describe this image", file_path="photo.jpg")
         
         >>> # Query with in-memory file (privacy-focused, no disk access)
         >>> import io
@@ -283,13 +239,6 @@ def query(
     if isinstance(provider, str):
         provider = Provider.from_string(provider)
     
-    # Check for mutually exclusive file parameters
-    if file_path is not None and file_like is not None:
-        raise ConfigurationError(
-            "Cannot specify both file_path and file_like. "
-            "Use file_path for disk files or file_like for in-memory BytesIO objects, not both."
-        )
-    
     # Get API key
     key = _get_api_key(provider, api_key)
     
@@ -308,54 +257,27 @@ def query(
     
     # Prepare file data if provided
     file_data = None
-    if file_path:
-        file_data = _prepare_file_data(file_path)
-    elif file_like:
+    if file_like:
         # Use provided filename, fall back to .name attribute, then default
         file_hint = filename or getattr(file_like, 'name', 'upload.bin')
         file_data = _prepare_file_like_data(file_like, filename=file_hint)
-    
-    # Check for unsupported providers
-    if provider == Provider.CLAUDE:
-        raise ConfigurationError(
-            "Claude is not supported in msgmodel.\n\n"
-            "REASON: Claude retains data for up to 30 days for abuse prevention.\n"
-            "This is incompatible with msgmodel's zero-retention privacy requirements.\n\n"
-            "ALTERNATIVES:\n"
-            "  - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring only\n"
-            "    • Requires Google Cloud Billing with paid API quota\n"
-            "    • See: https://ai.google.dev/gemini-api/terms\n\n"
-            "  - OpenAI: Zero data retention (enforced non-negotiably)\n"
-            "    • See: https://platform.openai.com/docs/guides/zero-data-retention\n\n"
-            "Use 'openai' or 'gemini' provider instead."
-        )
     
     # Create provider instance and make request
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
         prov = OpenAIProvider(key, config)
-        try:
-            # Handle PDF upload for OpenAI (disk files only, not BytesIO)
-            if file_data and file_data.get("mime_type") == MIME_TYPE_PDF and not file_data.get("is_file_like"):
-                file_id = prov.upload_file(file_data["path"])
-                file_data["file_id"] = file_id
-            
-            raw_response = prov.query(prompt, system_instruction, file_data)
-            text = prov.extract_text(raw_response)
-        finally:
-            prov.cleanup()
+        raw_response = prov.query(prompt, system_instruction, file_data)
+        text = prov.extract_text(raw_response)
         
     elif provider == Provider.GEMINI:
         assert isinstance(config, GeminiConfig)
         prov = GeminiProvider(key, config)
         raw_response = prov.query(prompt, system_instruction, file_data)
         text = prov.extract_text(raw_response)
-        
-    else:  # Provider.CLAUDE
-        assert isinstance(config, ClaudeConfig)
-        prov = ClaudeProvider(key, config)
-        raw_response = prov.query(prompt, system_instruction, file_data)
-        text = prov.extract_text(raw_response)
+    
+    else:
+        # Should never reach here due to Provider enum, but maintain type safety
+        raise ConfigurationError(f"Unsupported provider: {provider}")
     
     # Extract usage info if available
     usage = None
@@ -477,36 +399,17 @@ def stream(
         file_hint = filename or getattr(file_like, 'name', 'upload.bin')
         file_data = _prepare_file_like_data(file_like, filename=file_hint)
     
-    # Check for unsupported providers
-    if provider == Provider.CLAUDE:
-        raise ConfigurationError(
-            "Claude is not supported in msgmodel.\n\n"
-            "REASON: Claude retains data for up to 30 days for abuse prevention.\n"
-            "This is incompatible with msgmodel's zero-retention privacy requirements.\n\n"
-            "ALTERNATIVES:\n"
-            "  - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring only\n"
-            "    • Requires Google Cloud Billing with paid API quota\n"
-            "    • See: https://ai.google.dev/gemini-api/terms\n\n"
-            "  - OpenAI: Zero data retention (enforced non-negotiably)\n"
-            "    • See: https://platform.openai.com/docs/guides/zero-data-retention\n\n"
-            "Use 'openai' or 'gemini' provider instead."
-        )
-    
     # Create provider instance and stream
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
         prov = OpenAIProvider(key, config)
-        try:
-            # Handle PDF upload for OpenAI (disk files only, not BytesIO)
-            if file_data and file_data.get("mime_type") == MIME_TYPE_PDF and not file_data.get("is_file_like"):
-                file_id = prov.upload_file(file_data["path"])
-                file_data["file_id"] = file_id
-            
-            yield from prov.stream(prompt, system_instruction, file_data)
-        finally:
-            prov.cleanup()
+        yield from prov.stream(prompt, system_instruction, file_data)
         
     elif provider == Provider.GEMINI:
         assert isinstance(config, GeminiConfig)
         prov = GeminiProvider(key, config)
         yield from prov.stream(prompt, system_instruction, file_data)
+    
+    else:
+        # Should never reach here due to Provider enum, but maintain type safety
+        raise ConfigurationError(f"Unsupported provider: {provider}")

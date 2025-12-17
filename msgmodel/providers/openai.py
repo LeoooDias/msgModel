@@ -9,35 +9,35 @@ ZERO DATA RETENTION (ZDR) - ENFORCED:
 - This header instructs OpenAI not to store inputs and outputs for service improvements.
 - ZDR is non-negotiable and cannot be disabled.
 - See: https://platform.openai.com/docs/guides/zero-data-retention
+
+FILE UPLOADS:
+- All file uploads are via inline base64-encoding in prompts (no Files API)
+- Files are limited to practical API size constraints (~15-20MB)
+- This approach provides better privacy and stateless operation
 """
 
 import json
 import base64
 import logging
-import time
-from typing import Optional, Dict, Any, List, Iterator
+from typing import Optional, Dict, Any, Iterator, List
 
 import requests
 
-from ..config import OpenAIConfig, OPENAI_URL, OPENAI_FILES_URL
+from ..config import OpenAIConfig, OPENAI_URL
 from ..exceptions import APIError, ProviderError, StreamingError
 
 logger = logging.getLogger(__name__)
 
 # MIME type constants
 MIME_TYPE_JSON = "application/json"
-MIME_TYPE_PDF = "application/pdf"
-
-# Retry configuration for file deletion (to ensure cleanup)
-FILE_DELETE_MAX_RETRIES = 3
-FILE_DELETE_RETRY_DELAY = 0.5  # seconds
 
 
 class OpenAIProvider:
     """
     OpenAI API provider for making LLM requests.
     
-    Handles file uploads, API calls, and response parsing for OpenAI models.
+    Handles API calls and response parsing for OpenAI models.
+    All file uploads use inline base64-encoding for privacy and statelessness.
     """
     
     def __init__(self, api_key: str, config: Optional[OpenAIConfig] = None):
@@ -50,137 +50,6 @@ class OpenAIProvider:
         """
         self.api_key = api_key
         self.config = config or OpenAIConfig()
-        self._uploaded_file_ids: List[str] = []
-    
-    def upload_file(self, file_path: str, purpose: str = "assistants") -> str:
-        """
-        Upload a file to OpenAI Files API.
-        
-        Args:
-            file_path: Path to the file to upload
-            purpose: Purpose of the upload
-            
-        Returns:
-            The file ID assigned by OpenAI
-            
-        Raises:
-            APIError: If the upload fails
-        """
-        from pathlib import Path
-        
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        
-        try:
-            with open(file_path, "rb") as f:
-                files = {"file": (Path(file_path).name, f)}
-                data = {"purpose": purpose}
-                response = requests.post(
-                    OPENAI_FILES_URL, 
-                    headers=headers, 
-                    files=files, 
-                    data=data
-                )
-        except IOError as e:
-            raise APIError(f"Failed to read file for upload: {e}")
-        
-        if not response.ok:
-            raise APIError(
-                f"File upload failed: {response.text}",
-                status_code=response.status_code,
-                response_text=response.text
-            )
-        
-        file_id = response.json().get("id")
-        self._uploaded_file_ids.append(file_id)
-        return file_id
-    
-    def delete_file(self, file_id: str, max_retries: int = FILE_DELETE_MAX_RETRIES) -> bool:
-        """
-        Delete a file from OpenAI Files API with retry logic.
-        
-        Implements exponential backoff to handle transient failures and ensure
-        files are cleaned up even if the API is temporarily unavailable.
-        
-        Args:
-            file_id: The file ID to delete
-            max_retries: Maximum number of retry attempts (default: 3)
-            
-        Returns:
-            True if deletion was successful, False if all retries exhausted
-        """
-        url = f"{OPENAI_FILES_URL}/{file_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        
-        for attempt in range(max_retries):
-            try:
-                response = requests.delete(url, headers=headers, timeout=10)
-                if response.ok:
-                    if file_id in self._uploaded_file_ids:
-                        self._uploaded_file_ids.remove(file_id)
-                    logger.info(f"Successfully deleted file {file_id}")
-                    return True
-                elif response.status_code == 404:
-                    # File already deleted or doesn't exist
-                    if file_id in self._uploaded_file_ids:
-                        self._uploaded_file_ids.remove(file_id)
-                    logger.info(f"File {file_id} not found (already deleted)")
-                    return True
-                else:
-                    # Transient error, retry
-                    if attempt < max_retries - 1:
-                        wait_time = FILE_DELETE_RETRY_DELAY * (2 ** attempt)
-                        logger.warning(
-                            f"Delete file {file_id} failed (attempt {attempt + 1}/{max_retries}): "
-                            f"{response.status_code} - {response.text}. Retrying in {wait_time}s..."
-                        )
-                        time.sleep(wait_time)
-                    else:
-                        logger.error(
-                            f"Failed to delete file {file_id} after {max_retries} attempts: "
-                            f"{response.status_code} - {response.text}"
-                        )
-                        return False
-            except requests.RequestException as e:
-                if attempt < max_retries - 1:
-                    wait_time = FILE_DELETE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(
-                        f"Request exception while deleting file {file_id} "
-                        f"(attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                else:
-                    logger.error(
-                        f"Request exception while deleting file {file_id} after {max_retries} attempts: {e}"
-                    )
-                    return False
-        
-        return False
-    
-    def cleanup(self) -> None:
-        """
-        Delete all uploaded files if configured to do so.
-        
-        This ensures that temporary files uploaded to OpenAI are removed to maintain
-        statelessness. Failures are logged but do not raise exceptions to avoid
-        masking the original operation's success/failure.
-        """
-        if not self.config.delete_files_after_use:
-            return
-        
-        failed_deletions = []
-        for file_id in list(self._uploaded_file_ids):
-            if not self.delete_file(file_id):
-                failed_deletions.append(file_id)
-        
-        if failed_deletions:
-            logger.error(
-                f"Cleanup incomplete: Failed to delete {len(failed_deletions)} file(s): {failed_deletions}. "
-                f"Manual cleanup may be required."
-            )
-        else:
-            if self._uploaded_file_ids:
-                logger.info(f"All uploaded files cleaned up successfully")
-            self._uploaded_file_ids.clear()
     
     def _build_headers(self) -> Dict[str, str]:
         """

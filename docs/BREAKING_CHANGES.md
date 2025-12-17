@@ -1,554 +1,354 @@
-# Breaking Changes: Privacy Enforcement Update
+# Breaking Changes in msgmodel
 
-**Version**: 3.0.0 (Breaking Release)  
-**Date**: December 16, 2025  
-**Scope**: msgmodel library - strict zero-retention privacy enforcement for all sensitive data
+## Summary
 
----
-
-## Summary of Breaking Changes
-
-This release enforces **zero-retention data policies** across all providers. The library now **requires** paid API tiers for all providers and removes all options to accept data retention.
-
-### What Changed
-
-| Component | Before | After | Impact |
-|-----------|--------|-------|--------|
-| **OpenAI** | `store_data` parameter optional (default False) | `store_data` parameter removed | ✅ Always ZDR |
-| **Gemini** | `use_paid_api` parameter optional (default False) | `use_paid_api` parameter removed | ✅ Paid tier required |
-| **Claude** | Supported (30-day retention) | **NOT SUPPORTED** | ❌ Raises ConfigurationError |
-| **Billing** | Not verified | Verified on first API call | ✅ Ensures paid access |
-| **Error handling** | Silent warnings | Stern, security-focused errors | ✅ Clear requirements |
+msgmodel has undergone significant architectural changes to prioritize **privacy**, **statelessness**, and **code simplification**. This document details all breaking changes and migration paths.
 
 ---
 
-## Detailed Breaking Changes
+## Version 3.2.0 (Current)
 
-### 1. OpenAI: `store_data` Parameter Removed
+### Major Breaks
 
-**Before**:
+#### 1. File Upload Method Changed to BytesIO-Only
+
+**What broke:**
+- The `file_path` parameter in `query()` and `stream()` has been **completely removed**
+- All file uploads must now use `file_like: Optional[io.BytesIO]`
+- Disk file access for uploads is **no longer supported**
+
+**Error you'll see:**
 ```python
-from msgmodel import query, OpenAIConfig
-
-# Explicitly set store_data
-config = OpenAIConfig(store_data=False)  # Zero Data Retention
-response = query("openai", "prompt", config=config)
-
-# Or allow it to default
-config = OpenAIConfig()  # store_data=False by default
-response = query("openai", "prompt", config=config)
-
-# Or disable ZDR (not recommended)
-config = OpenAIConfig(store_data=True)  # ❌ No longer possible
-response = query("openai", "prompt", config=config)
+query("openai", "Hello", file_path="photo.jpg")
+# TypeError: query() got an unexpected keyword argument 'file_path'
 ```
 
-**After**:
+**Migration:**
 ```python
-from msgmodel import query, OpenAIConfig
+# OLD (v3.1.x and earlier)
+response = query("openai", "Describe this", file_path="photo.jpg")
 
-# store_data parameter no longer exists
-# ZDR is enforced automatically with X-OpenAI-No-Store header
-config = OpenAIConfig()  # No parameters needed
-response = query("openai", "prompt", config=config)
+# NEW (v3.2.0+)
+import io
 
-# Attempting to set store_data raises TypeError
-config = OpenAIConfig(store_data=False)
-# TypeError: __init__() got an unexpected keyword argument 'store_data'
+with open("photo.jpg", "rb") as f:
+    file_obj = io.BytesIO(f.read())
+
+response = query("openai", "Describe this", file_like=file_obj, filename="photo.jpg")
 ```
 
-**Migration**:
-```python
-# OLD CODE
-config = OpenAIConfig(store_data=False)
+**Why this change:**
+- Better privacy: Files never uploaded to provider servers
+- Stateless operation: Each request is completely independent
+- Simpler codebase: Eliminates file upload/cleanup complexity
 
-# NEW CODE - Just remove the parameter
-config = OpenAIConfig()
-```
-
-**Why**: ZDR is non-negotiable for privacy-critical applications. Removing the parameter eliminates the possibility of accidental data retention.
+**File size limits (no validation, errors returned by API):**
+- OpenAI: ~15-20MB practical limit
+- Gemini: ~22MB practical limit
 
 ---
 
-### 2. Gemini: `use_paid_api` Parameter Removed + Billing Verification
+#### 2. OpenAI Files API Removed
 
-**Before**:
+**What broke:**
+- `OpenAIProvider.upload_file()` method removed
+- `OpenAIProvider.delete_file()` method removed  
+- `OpenAIProvider.cleanup()` method removed
+- `delete_files_after_use` parameter removed from `OpenAIConfig`
+
+**Error you'll see:**
 ```python
-from msgmodel import query, GeminiConfig
+# If you were calling these methods directly
+prov = OpenAIProvider(api_key, config)
+prov.upload_file("file.pdf")  # ❌ AttributeError: 'OpenAIProvider' has no attribute 'upload_file'
+prov.cleanup()  # ❌ AttributeError: 'OpenAIProvider' has no attribute 'cleanup'
 
-# Unpaid services (default) - data retained for training
-config = GeminiConfig()
-response = query("gemini", "prompt", config=config)
-# Warning: "Gemini is configured for UNPAID SERVICES..."
-
-# Paid services - requires Cloud Billing
-config = GeminiConfig(use_paid_api=True)
-response = query("gemini", "prompt", config=config)
-# No warning (assumes you have paid quota)
-
-# This was allowed but data was retained
-config = GeminiConfig(use_paid_api=False)
-response = query("gemini", "prompt", config=config)
-# Warning issued but request proceeded
+# If you were using this config parameter
+config = OpenAIConfig(delete_files_after_use=True)  # ❌ TypeError: unexpected keyword argument 'delete_files_after_use'
 ```
 
-**After**:
+**Migration:**
+- Stop calling `upload_file()`, `delete_file()`, and `cleanup()` directly
+- Let the base64 inline encoding handle file transfers automatically
+- Remove `delete_files_after_use` from any OpenAIConfig instantiations
+
+**Old code:**
 ```python
-from msgmodel import query, GeminiConfig
-
-# use_paid_api parameter no longer exists
-# Paid tier is automatically required and verified
-config = GeminiConfig()
-response = query("gemini", "prompt", config=config)
-# Billing verification happens on first API call
-
-# Attempting to set use_paid_api raises TypeError
-config = GeminiConfig(use_paid_api=True)
-# TypeError: __init__() got an unexpected keyword argument 'use_paid_api'
-```
-
-**Billing Verification**:
-```python
-from msgmodel import query, GeminiConfig
-from msgmodel.exceptions import ConfigurationError
-
-config = GeminiConfig()
-
+# OLD (v3.1.x)
+prov = OpenAIProvider(api_key, config)
 try:
-    response = query("gemini", "prompt", config=config)
-except ConfigurationError as e:
-    print(f"BILLING VERIFICATION FAILED: {e}")
-    # Message will indicate why: rate limit, access denied, no billing, etc.
+    file_id = prov.upload_file("document.pdf")
+    response = prov.query(prompt, None, {"file_id": file_id})
+finally:
+    prov.cleanup()
 ```
 
-**Migration**:
+**New code:**
 ```python
-# OLD CODE
-config = GeminiConfig(use_paid_api=True)
+# NEW (v3.2.0+)
+import io
 
-# NEW CODE - Just remove the parameter
-config = GeminiConfig()
+with open("document.pdf", "rb") as f:
+    file_obj = io.BytesIO(f.read())
 
-# REQUIREMENT: Ensure your Google Cloud project has:
-# 1. Cloud Billing account linked
-# 2. PAID API quota enabled (not free tier)
-# 3. Sufficient billing credits
-# See: https://console.cloud.google.com/billing
+prov = OpenAIProvider(api_key, config)
+file_data = _prepare_file_like_data(file_obj, "document.pdf")
+response = prov.query(prompt, None, file_data)
+# No cleanup needed—stateless design
 ```
 
-**Why**: Paid tier is mandatory for zero-retention enforcement. Removing the parameter eliminates the possibility of accidentally using unpaid tier with data retention.
+**Actually, don't call provider methods directly. Use the public API:**
 
----
-
-### 3. Claude: No Longer Supported
-
-**Before**:
 ```python
-from msgmodel import query, ClaudeConfig
-
-# Claude was supported
-config = ClaudeConfig()
-response = query("claude", "prompt", config=config)
-# Worked fine (data retained for 30 days)
-```
-
-**After**:
-```python
+# RECOMMENDED (v3.2.0+)
+import io
 from msgmodel import query
-from msgmodel.exceptions import ConfigurationError
 
-try:
-    response = query("claude", "prompt")
-except ConfigurationError as e:
-    print(e)
-    # Error: "Claude is not supported in msgmodel.
-    #        Claude retains data for up to 30 days for abuse prevention.
-    #        This is incompatible with msgmodel's zero-retention privacy requirements.
-    #        Use: Google Gemini (paid tier) or OpenAI instead."
+with open("document.pdf", "rb") as f:
+    file_obj = io.BytesIO(f.read())
+
+response = query("openai", "Summarize this", file_like=file_obj, filename="document.pdf")
 ```
 
-**Migration**:
-```python
-# OLD CODE
-response = query("claude", "prompt")
-
-# NEW CODE - Switch to Gemini (paid) or OpenAI
-response = query("openai", "prompt")  # Zero data retention
-# OR
-response = query("gemini", "prompt")  # Paid tier only, abuse monitoring only
-```
-
-**Why**: Claude's 30-day minimum retention is incompatible with zero-retention privacy requirements.
+**Why this change:**
+- Eliminates server-side file persistence
+- Reduces code complexity
+- Aligns with stateless design philosophy
 
 ---
 
-## Required Setup for Each Provider
+#### 3. Claude/Anthropic Support Completely Removed
 
-### OpenAI
+**What broke:**
+- `ClaudeConfig` class removed entirely
+- `ClaudeProvider` class removed entirely
+- `Provider.CLAUDE` enum value removed
+- All Claude imports will fail
+- Attempting to use Claude will raise `ValueError`
 
-✅ **No changes to your API setup required**
-
+**Error you'll see:**
 ```python
-from msgmodel import query, OpenAIConfig
+# If you try to import ClaudeConfig
+from msgmodel import ClaudeConfig  # ❌ ImportError: cannot import name 'ClaudeConfig'
 
-# Just use it - ZDR is enforced automatically
-config = OpenAIConfig(model="gpt-4o")
-response = query("openai", "sensitive prompt", config=config)
+# If you try to use Claude provider
+response = query("claude", "Hello")  # ❌ ValueError: Invalid provider 'claude'
 
-# ✅ Data will NOT be retained for training
-# ✅ Files (if any) will be deleted immediately
+# If you try to create ClaudeConfig
+config = ClaudeConfig()  # ❌ NameError: name 'ClaudeConfig' is not defined
+```
+
+**Migration:**
+Switch to one of these providers:
+
+**Option 1: OpenAI (Recommended for zero-retention)**
+```python
+# OLD (v3.1.x)
+response = query("claude", "Hello", api_key=claude_key)
+
+# NEW (v3.2.0+) - Zero Data Retention enforced
+response = query("openai", "Hello", api_key=openai_key)
+```
+
+**Option 2: Google Gemini (Paid Tier - ~24-72h abuse monitoring retention)**
+```python
+# OLD (v3.1.x)
+response = query("claude", "Hello", api_key=claude_key)
+
+# NEW (v3.2.0+) - Requires Google Cloud Billing with paid quota
+response = query("gemini", "Hello", api_key=gemini_key)
+```
+
+**Why this change:**
+- Claude retains data for up to 30 days for abuse prevention
+- This is incompatible with msgmodel's zero-retention privacy requirements
+- Simplifies codebase and reduces maintenance burden
+
+**Privacy comparison:**
+| Provider | Retention | Recommendation |
+|----------|-----------|-----------------|
+| OpenAI | Zero (ZDR enforced) | ✅ Best for privacy |
+| Gemini (Paid) | ~24-72h (abuse monitoring only) | ✅ Good for privacy |
+| Claude | 30 days (abuse prevention) | ❌ Not supported |
+
+---
+
+#### 4. Configuration Changes
+
+**Removed from OpenAIConfig:**
+- `delete_files_after_use: bool` parameter (no longer applicable)
+
+**Updated OpenAIConfig docstring:**
+- Added note: "File uploads are only supported via inline base64-encoding in prompts"
+- Added note: "Files are limited to practical API size constraints (~15-20MB)"
+
+**Updated GeminiConfig docstring:**
+- Added note: "File uploads are only supported via inline base64-encoding in prompts"
+- Added note: "Files are limited to practical API size constraints (~22MB)"
+
+**Migration for OpenAIConfig:**
+```python
+# OLD (v3.1.x)
+config = OpenAIConfig(
+    model="gpt-4o",
+    delete_files_after_use=True  # ❌ Remove this
+)
+
+# NEW (v3.2.0+)
+config = OpenAIConfig(
+    model="gpt-4o"
+)
 ```
 
 ---
 
-### Google Gemini
+#### 5. Core Module Function Signature Changes
 
-⚠️ **REQUIRES Google Cloud Billing setup**
-
-**Prerequisite Checklist**:
-- [ ] You have a Google Cloud project
-- [ ] Cloud Billing account is linked to the project
-- [ ] **PAID** API quota is enabled (not free tier)
-- [ ] You have billing credits available
-
-**Verification**:
-```bash
-# Go to Google Cloud Console
-https://console.cloud.google.com/billing
-
-# Verify:
-# 1. Billing account is linked
-# 2. Payment method is active
-# 3. Budget shows paid quota (not just free tier)
-```
-
-**Code**:
+**`query()` signature changed:**
 ```python
-from msgmodel import query, GeminiConfig
-from msgmodel.exceptions import ConfigurationError
+# OLD (v3.1.x)
+def query(
+    provider: Union[str, Provider],
+    prompt: str,
+    api_key: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    file_path: Optional[str] = None,  # ❌ REMOVED
+    file_like: Optional[io.BytesIO] = None,
+    filename: Optional[str] = None,
+    config: Optional[ProviderConfig] = None,
+    max_tokens: Optional[int] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+) -> LLMResponse:
+    ...
 
-config = GeminiConfig(model="gemini-2.5-flash")
-
-try:
-    response = query("gemini", "sensitive prompt", config=config)
-    # Billing verified! Data protected from training use.
-except ConfigurationError as e:
-    # Billing verification failed
-    print(f"Fix: {e}")
-    # Check:
-    # 1. Cloud Billing is actually linked
-    # 2. Paid quota is enabled (not free tier)
-    # 3. API key is valid for that project
+# NEW (v3.2.0+)
+def query(
+    provider: Union[str, Provider],
+    prompt: str,
+    api_key: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    file_like: Optional[io.BytesIO] = None,  # ✅ BytesIO only
+    filename: Optional[str] = None,
+    config: Optional[ProviderConfig] = None,
+    max_tokens: Optional[int] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+) -> LLMResponse:
+    ...
 ```
 
-**If billing verification fails**:
-```
-ConfigurationError: BILLING VERIFICATION FAILED: Rate limit exceeded.
-This may indicate unpaid quota. Ensure your Google Cloud project has:
-  1. Cloud Billing account linked
-  2. PAID API quota enabled (not free tier)
-  3. Sufficient billing credits
-See: https://console.cloud.google.com/billing
-```
+**`stream()` signature changed:**
+- Same changes as `query()`
+
+**Removed functions:**
+- `_prepare_file_data()` — No longer needed (disk file access removed)
+
+**Updated functions:**
+- `_prepare_file_like_data()` — Now the **only** file preparation function
+
+---
+
+### Summary Table
+
+| Item | v3.1.x | v3.2.0+ | Status |
+|------|--------|---------|--------|
+| `file_path` param in `query()` | ✅ Supported | ❌ Removed | **Breaking** |
+| `file_path` param in `stream()` | ✅ Supported | ❌ Removed | **Breaking** |
+| `file_like` param in `query()` | ✅ Supported | ✅ Supported | OK |
+| `file_like` param in `stream()` | ✅ Supported | ✅ Supported | OK |
+| `OpenAIProvider.upload_file()` | ✅ Available | ❌ Removed | **Breaking** |
+| `OpenAIProvider.delete_file()` | ✅ Available | ❌ Removed | **Breaking** |
+| `OpenAIProvider.cleanup()` | ✅ Available | ❌ Removed | **Breaking** |
+| `delete_files_after_use` config | ✅ Parameter | ❌ Removed | **Breaking** |
+| Claude/Anthropic support | ✅ Supported | ❌ Removed | **Breaking** |
+| `ClaudeConfig` class | ✅ Available | ❌ Removed | **Breaking** |
+| `ClaudeProvider` class | ✅ Available | ❌ Removed | **Breaking** |
+| `Provider.CLAUDE` enum | ✅ Available | ❌ Removed | **Breaking** |
+| OpenAI ZDR enforcement | ✅ Enforced | ✅ Enforced | OK |
+| Gemini paid tier requirement | ✅ Required | ✅ Required | OK |
 
 ---
 
 ## Migration Checklist
 
-### For Projects Using OpenAI
+Use this checklist to migrate your code to v3.2.0:
 
-```python
-# 1. Update imports (no change needed)
-from msgmodel import query, OpenAIConfig
-
-# 2. Remove store_data parameter if present
-# BEFORE:
-# config = OpenAIConfig(store_data=False)
-
-# AFTER:
-config = OpenAIConfig()
-
-# 3. Test
-response = query("openai", "test", config=config)
-assert response.text  # Should work
-```
-
-### For Projects Using Gemini
-
-```python
-# 1. Update imports (no change needed)
-from msgmodel import query, GeminiConfig
-
-# 2. Remove use_paid_api parameter if present
-# BEFORE:
-# config = GeminiConfig(use_paid_api=True)
-
-# AFTER:
-config = GeminiConfig()
-
-# 3. Verify Google Cloud Billing is active
-# Go to: https://console.cloud.google.com/billing
-# Check: Billing account linked + Paid quota enabled
-
-# 4. Test (will verify billing on first call)
-try:
-    response = query("gemini", "test", config=config)
-    assert response.text  # Should work
-except ConfigurationError as e:
-    print(f"Billing verification failed. Fix and retry.")
-    print(f"Details: {e}")
-```
-
-### For Projects Using Claude
-
-```python
-# 1. Switch to OpenAI (preferred) or Gemini (paid)
-
-# BEFORE:
-# response = query("claude", "prompt")
-
-# AFTER - Option 1: OpenAI (recommended)
-response = query("openai", "prompt")
-
-# AFTER - Option 2: Gemini (requires paid quota)
-response = query("gemini", "prompt")
-```
-
----
-
-## Error Messages You'll See
-
-### OpenAI
-
-**No changes expected** — OpenAI will work as before, just without `store_data` parameter.
-
----
-
-### Gemini - Billing Verification Failed (Rate Limited)
-
-```
-ConfigurationError: BILLING VERIFICATION FAILED: Rate limit exceeded.
-This may indicate unpaid quota. Ensure your Google Cloud project has:
-  1. Cloud Billing account linked
-  2. PAID API quota enabled (not free tier)
-  3. Sufficient billing credits
-See: https://console.cloud.google.com/billing
-```
-
-**Fix**: Wait a moment and retry. If persistent, check billing console.
-
----
-
-### Gemini - Billing Verification Failed (Access Denied)
-
-```
-ConfigurationError: BILLING VERIFICATION FAILED: Access denied (403).
-Ensure your API key has paid quota access:
-  1. Verify API key is valid
-  2. Confirm Cloud Billing is enabled
-  3. Check that paid quota is active (not free tier)
-See: https://console.cloud.google.com/billing
-```
-
-**Fix**: Regenerate API key or verify it's for the correct project with billing.
-
----
-
-### Claude (Not Supported)
-
-```
-ConfigurationError: Claude is not supported in msgmodel.
-
-REASON: Claude retains data for up to 30 days for abuse prevention.
-This is incompatible with msgmodel's zero-retention privacy requirements.
-
-ALTERNATIVES:
-  - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring only
-    • Requires Google Cloud Billing with paid API quota
-    • See: https://ai.google.dev/gemini-api/terms
-
-  - OpenAI: Zero data retention (enforced non-negotiably)
-    • See: https://platform.openai.com/docs/guides/zero-data-retention
-
-Use 'openai' or 'gemini' provider instead.
-```
-
-**Fix**: Switch to OpenAI or Gemini (paid).
-
----
-
-## Configuration Classes - Before & After
-
-### OpenAIConfig
-
-```python
-# BEFORE (v1.x)
-@dataclass
-class OpenAIConfig:
-    model: str = "gpt-4o"
-    temperature: float = 1.0
-    top_p: float = 1.0
-    max_tokens: int = 1000
-    n: int = 1
-    store_data: bool = False  # ← REMOVED
-    delete_files_after_use: bool = True
-
-# AFTER (v2.0)
-@dataclass
-class OpenAIConfig:
-    model: str = "gpt-4o"
-    temperature: float = 1.0
-    top_p: float = 1.0
-    max_tokens: int = 1000
-    n: int = 1
-    delete_files_after_use: bool = True
-    # store_data removed - ZDR always enforced
-```
-
-### GeminiConfig
-
-```python
-# BEFORE (v1.x)
-@dataclass
-class GeminiConfig:
-    model: str = "gemini-2.5-flash"
-    temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 40
-    max_tokens: int = 1000
-    candidate_count: int = 1
-    safety_threshold: str = "BLOCK_NONE"
-    api_version: str = "v1beta"
-    cache_control: bool = False
-    use_paid_api: bool = False  # ← REMOVED
-
-# AFTER (v2.0)
-@dataclass
-class GeminiConfig:
-    model: str = "gemini-2.5-flash"
-    temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 40
-    max_tokens: int = 1000
-    candidate_count: int = 1
-    safety_threshold: str = "BLOCK_NONE"
-    api_version: str = "v1beta"
-    cache_control: bool = False
-    # use_paid_api removed - paid tier always required & verified
-```
-
-### ClaudeConfig
-
-```python
-# BEFORE (v1.x)
-@dataclass
-class ClaudeConfig:
-    model: str = "claude-sonnet-4-20250514"
-    temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 40
-    max_tokens: int = 1000
-    cache_control: bool = False
-
-# AFTER (v2.0)
-# ClaudeConfig still exists but attempting to use Claude raises:
-# ConfigurationError: Claude is not supported in msgmodel.
-# Do not instantiate or pass this config to query().
-```
+- [ ] Remove all `file_path` parameters from `query()` and `stream()` calls
+- [ ] Convert all disk file access to BytesIO:
+  ```python
+  # Old
+  response = query(..., file_path="file.pdf")
+  
+  # New
+  with open("file.pdf", "rb") as f:
+      response = query(..., file_like=io.BytesIO(f.read()), filename="file.pdf")
+  ```
+- [ ] Remove any calls to `provider.upload_file()`, `provider.delete_file()`, `provider.cleanup()`
+- [ ] Remove `delete_files_after_use` parameter from any `OpenAIConfig` instantiations
+- [ ] Replace all `claude` provider calls with `openai` or `gemini`
+- [ ] Remove `from msgmodel import ClaudeConfig` imports
+- [ ] Update tests to use `file_like` parameter instead of `file_path`
+- [ ] Review error messages for any references to removed functionality
+- [ ] Test with files up to ~15-20MB (OpenAI) or ~22MB (Gemini)
 
 ---
 
 ## Testing Your Migration
 
-### Test 1: OpenAI Works
-
+### Test file uploads with BytesIO:
 ```python
-from msgmodel import query, OpenAIConfig
+import io
+from msgmodel import query
 
-try:
-    config = OpenAIConfig()
-    response = query("openai", "test prompt")
-    print("✓ OpenAI works")
-    print(f"Response: {response.text[:50]}...")
-except Exception as e:
-    print(f"✗ OpenAI failed: {e}")
+# Test with small file
+data = b"Hello, world!"
+file_obj = io.BytesIO(data)
+
+response = query(
+    "openai",
+    "What is this?",
+    file_like=file_obj,
+    filename="test.txt"
+)
+print(response.text)
+
+# Test with larger file (but stay under limits)
+with open("large_file.pdf", "rb") as f:
+    file_data = f.read()
+    if len(file_data) > 20_000_000:  # 20MB
+        print("⚠️ Warning: File may exceed OpenAI limits")
+    
+    file_obj = io.BytesIO(file_data)
+    response = query(
+        "openai",
+        "Summarize this PDF",
+        file_like=file_obj,
+        filename="large_file.pdf"
+    )
 ```
 
-### Test 2: Gemini Works (with billing)
-
-```python
-from msgmodel import query, GeminiConfig
-from msgmodel.exceptions import ConfigurationError
-
-try:
-    config = GeminiConfig()
-    response = query("gemini", "test prompt")
-    print("✓ Gemini works (billing verified)")
-    print(f"Response: {response.text[:50]}...")
-except ConfigurationError as e:
-    print(f"✗ Billing verification failed: {e}")
-except Exception as e:
-    print(f"✗ Gemini failed: {e}")
-```
-
-### Test 3: Claude Rejected
-
+### Test provider selection:
 ```python
 from msgmodel import query
-from msgmodel.exceptions import ConfigurationError
 
+# ✅ This works
+response = query("openai", "Hello")
+response = query("o", "Hello")  # shorthand
+response = query("gemini", "Hello")
+response = query("g", "Hello")  # shorthand
+
+# ❌ This raises ValueError
 try:
-    response = query("claude", "test prompt")
-    print("✗ Claude should have been rejected")
-except ConfigurationError as e:
-    print("✓ Claude correctly rejected")
-    print(f"Reason: Claude is not supported (30-day retention)")
-except Exception as e:
-    print(f"✗ Unexpected error: {e}")
+    response = query("claude", "Hello")
+except ValueError as e:
+    print(f"Expected error: {e}")
 ```
 
 ---
 
-## FAQ
+## Further Reading
 
-### Q: Why remove store_data? Can't users choose?
-
-**A**: For privacy-critical applications, choice is dangerous. A developer might accidentally set `store_data=True` thinking it's safe, or forget the parameter entirely. Enforcement eliminates this risk.
-
-### Q: Why require paid Gemini tier?
-
-**A**: Unpaid Gemini indefinitely retains data for training. Sensitive data must not be used for AI training. Paid tier is the only Gemini option that prevents this.
-
-### Q: Why exclude Claude?
-
-**A**: Claude's minimum 30-day retention is incompatible with zero-retention privacy requirements. For comparison: OpenAI = 0 days, Gemini (paid) = 24-72 hours, Claude = 30 days. Claude doesn't meet the standard.
-
-### Q: What if I need to use a provider temporarily?
-
-**A**: Don't. If you're processing sensitive data, all requests must meet the standard. If you need to test with lower-security data, use a different script/environment.
-
-### Q: Can I downgrade to v1.x?
-
-**A**: Yes, but then you'll lose the enforcement. The whole point of v2.0 is to make mistakes impossible at the configuration level.
-
-### Q: My code breaks. Can you help?
-
-**A**: Yes. Use this guide to understand the changes, then update your configuration. Most changes are just removing parameters.
-
----
-
-## Support
-
-If you encounter issues during migration:
-
-1. **OpenAI**: Remove `store_data=...` from your config
-2. **Gemini**: Remove `use_paid_api=...` AND verify Cloud Billing is actually active
-3. **Claude**: Switch to OpenAI or Gemini
-
-For detailed privacy information, see the library's privacy documentation.
-
----
-
-**Release Date**: December 16, 2025  
-**Version**: 2.0.0  
-**Status**: Breaking changes required for strict privacy enforcement
+- [RELEASE_NOTES_v3.2.0.md](RELEASE_NOTES_v3.2.0.md) — Full release notes
+- [README.md](../README.md) — Updated usage guide
+- [FILE_LIKE_IMPLEMENTATION.md](FILE_LIKE_IMPLEMENTATION.md) — File handling details

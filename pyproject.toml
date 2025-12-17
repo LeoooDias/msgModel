@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "msgmodel"
-version = "3.1.2"
-description = "Privacy-focused Python library for interacting with LLM providers (OpenAI, Gemini). Zero-retention middleware with mandatory encryption and billing verification."
+version = "3.2.0"
+description = "Privacy-focused Python library for interacting with LLM providers (OpenAI, Gemini). Zero-retention middleware with stateless BytesIO-only file uploads."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -19,8 +19,6 @@ keywords = [
     "llm",
     "openai",
     "gemini",
-    "claude",
-    "anthropic",
     "gpt",
     "ai",
     "machine-learning",

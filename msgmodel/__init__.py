@@ -4,8 +4,7 @@ msgmodel
 
 A unified Python library for interacting with LLM providers.
 
-Supports OpenAI, Google Gemini, and Anthropic Claude with a single,
-consistent interface.
+Supports OpenAI and Google Gemini with a single, consistent interface.
 
 Basic usage:
     >>> from msgmodel import query
@@ -14,7 +13,7 @@ Basic usage:
 
 Streaming:
     >>> from msgmodel import stream
-    >>> for chunk in stream("claude", "Tell me a story"):
+    >>> for chunk in stream("openai", "Tell me a story"):
     ...     print(chunk, end="", flush=True)
 
 With custom configuration:
@@ -23,7 +22,7 @@ With custom configuration:
     >>> response = query("openai", "Hello!", config=config)
 """
 
-__version__ = "3.1.2"
+__version__ = "3.2.0"
 __author__ = "Leo Dias"
 
 # Core API
@@ -34,7 +33,6 @@ from .config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
-    ClaudeConfig,
     get_default_config,
 )
 
@@ -50,7 +48,7 @@ from .exceptions import (
 )
 
 # Providers (for advanced usage)
-from .providers import OpenAIProvider, GeminiProvider, ClaudeProvider
+from .providers import OpenAIProvider, GeminiProvider
 
 __all__ = [
     # Version
@@ -63,7 +61,6 @@ __all__ = [
     "Provider",
     "OpenAIConfig",
     "GeminiConfig",
-    "ClaudeConfig",
     "get_default_config",
     # Exceptions
     "MsgModelError",
@@ -76,5 +73,4 @@ __all__ = [
     # Providers
     "OpenAIProvider",
     "GeminiProvider",
-    "ClaudeProvider",
 ]

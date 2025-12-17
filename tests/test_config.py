@@ -7,7 +7,6 @@ from msgmodel.config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
-    ClaudeConfig,
     get_default_config,
 )
 
@@ -19,13 +18,11 @@ class TestProvider:
         """Test conversion from full provider names."""
         assert Provider.from_string("openai") == Provider.OPENAI
         assert Provider.from_string("gemini") == Provider.GEMINI
-        assert Provider.from_string("claude") == Provider.CLAUDE
     
     def test_from_string_shortcuts(self):
         """Test conversion from shortcut codes."""
         assert Provider.from_string("o") == Provider.OPENAI
         assert Provider.from_string("g") == Provider.GEMINI
-        assert Provider.from_string("c") == Provider.CLAUDE
     
     def test_from_string_case_insensitive(self):
         """Test that conversion is case-insensitive."""
@@ -61,7 +58,6 @@ class TestOpenAIConfig:
         assert config.top_p == 1.0
         assert config.max_tokens == 1000
         assert config.n == 1
-        assert config.delete_files_after_use is True
     
     def test_custom_values(self):
         """Test custom configuration values."""
@@ -102,30 +98,6 @@ class TestGeminiConfig:
         assert config.safety_threshold == "BLOCK_MEDIUM_AND_ABOVE"
 
 
-class TestClaudeConfig:
-    """Tests for ClaudeConfig dataclass."""
-    
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = ClaudeConfig()
-        assert config.model == "claude-sonnet-4-20250514"
-        assert config.temperature == 1.0
-        assert config.top_p == 0.95
-        assert config.top_k == 40
-        assert config.max_tokens == 1000
-    
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = ClaudeConfig(
-            model="claude-3-opus-20240229",
-            temperature=0.3,
-            max_tokens=4000,
-        )
-        assert config.model == "claude-3-opus-20240229"
-        assert config.temperature == 0.3
-        assert config.max_tokens == 4000
-
-
 class TestGetDefaultConfig:
     """Tests for get_default_config function."""
     
@@ -133,7 +105,6 @@ class TestGetDefaultConfig:
         """Test that correct config type is returned for each provider."""
         assert isinstance(get_default_config(Provider.OPENAI), OpenAIConfig)
         assert isinstance(get_default_config(Provider.GEMINI), GeminiConfig)
-        assert isinstance(get_default_config(Provider.CLAUDE), ClaudeConfig)
     
     def test_returns_new_instance(self):
         """Test that a new instance is returned each time."""

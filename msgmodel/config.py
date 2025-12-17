@@ -18,7 +18,6 @@ class Provider(str, Enum):
     """Supported LLM providers."""
     OPENAI = "openai"
     GEMINI = "gemini"
-    CLAUDE = "claude"
     
     @classmethod
     def from_string(cls, value: str) -> "Provider":
@@ -26,7 +25,7 @@ class Provider(str, Enum):
         Convert string to Provider enum.
         
         Args:
-            value: Provider name or shorthand ('o', 'g', 'c', 'openai', 'gemini', 'claude')
+            value: Provider name or shorthand ('o', 'g', 'openai', 'gemini')
             
         Returns:
             Provider enum member
@@ -40,7 +39,6 @@ class Provider(str, Enum):
         shortcuts = {
             'o': cls.OPENAI,
             'g': cls.GEMINI,
-            'c': cls.CLAUDE,
         }
         
         if value in shortcuts:
@@ -51,7 +49,7 @@ class Provider(str, Enum):
             if provider.value == value:
                 return provider
         
-        valid = ", ".join([f"'{p.value}'" for p in cls] + ["'o'", "'g'", "'c'"])
+        valid = ", ".join([f"'{p.value}'" for p in cls] + ["'o'", "'g'"])
         raise ValueError(f"Invalid provider '{value}'. Valid options: {valid}")
 
 
@@ -59,19 +57,15 @@ class Provider(str, Enum):
 # API URLs (constants, not configurable per-request)
 # ============================================================================
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_FILES_URL = "https://api.openai.com/v1/files"
 GEMINI_URL = "https://generativelanguage.googleapis.com"
-CLAUDE_URL = "https://api.anthropic.com"
 
 # Environment variable names for API keys
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
-GEMINI_API_KEY_ENV = "GEMINI_API_KEY"  
-CLAUDE_API_KEY_ENV = "ANTHROPIC_API_KEY"
+GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 
 # Default API key file names (for backward compatibility)
 OPENAI_API_KEY_FILE = "openai-api.key"
 GEMINI_API_KEY_FILE = "gemini-api.key"
-CLAUDE_API_KEY_FILE = "claude-api.key"
 
 
 @dataclass
@@ -91,18 +85,15 @@ class OpenAIConfig:
         top_p: Nucleus sampling parameter
         max_tokens: Maximum tokens to generate
         n: Number of completions to generate
-        delete_files_after_use: Whether to delete uploaded files after use (default: True).
-                               Ensures cleanup of temporary files for statelessness.
     
-    Note: store_data parameter has been removed. Zero Data Retention is enforced
-    for all requests and cannot be disabled.
+    Note: File uploads are only supported via inline base64-encoding in prompts.
+    Files are limited to practical API size constraints (~15-20MB).
     """
     model: str = "gpt-4o"
     temperature: float = 1.0
     top_p: float = 1.0
     max_tokens: int = 1000
     n: int = 1
-    delete_files_after_use: bool = True
 
 
 @dataclass
@@ -134,8 +125,8 @@ class GeminiConfig:
         api_version: API version to use
         cache_control: Whether to enable caching
     
-    Note: use_paid_api parameter has been removed. Paid tier is now required
-    and automatically enforced. Billing verification occurs on first use.
+    Note: File uploads are only supported via inline base64-encoding in prompts.
+    Files are limited to practical API size constraints (~22MB).
     """
     model: str = "gemini-2.5-flash"
     temperature: float = 1.0
@@ -147,37 +138,8 @@ class GeminiConfig:
     api_version: str = "v1beta"
     cache_control: bool = False
 
-
-@dataclass
-class ClaudeConfig:
-    """
-    Configuration for Anthropic Claude API calls.
-    
-    **NOT SUPPORTED**: Claude is excluded from this library.
-    
-    Reason: Claude retains data for up to 30 days for abuse prevention.
-    For sensitive information and privacy-critical applications, this retention
-    period is incompatible with zero-retention requirements.
-    
-    Supported alternatives:
-    - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring
-    - OpenAI: Zero data retention (non-negotiable enforcement)
-    
-    If you attempt to use Claude, you will receive a ConfigurationError
-    with instructions to use Gemini (paid) or OpenAI instead.
-    
-    See: https://www.anthropic.com/privacy
-    """
-    model: str = "claude-sonnet-4-20250514"
-    temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 40
-    max_tokens: int = 1000
-    cache_control: bool = False
-
-
-# Type alias for any config
-ProviderConfig = OpenAIConfig | GeminiConfig | ClaudeConfig
+# Type alias for supported configs
+ProviderConfig = OpenAIConfig | GeminiConfig
 
 
 def get_default_config(provider: Provider) -> ProviderConfig:
@@ -193,6 +155,5 @@ def get_default_config(provider: Provider) -> ProviderConfig:
     configs = {
         Provider.OPENAI: OpenAIConfig,
         Provider.GEMINI: GeminiConfig,
-        Provider.CLAUDE: ClaudeConfig,
     }
     return configs[provider]()

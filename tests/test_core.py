@@ -14,7 +14,6 @@ import tempfile
 
 from msgmodel.core import (
     _get_api_key,
-    _prepare_file_data,
     _prepare_file_like_data,
     _validate_max_tokens,
     query,
@@ -101,51 +100,6 @@ class TestGetApiKey:
                 os.chdir(original_cwd)
 
 
-class TestPrepareFileData:
-    """Tests for _prepare_file_data function."""
-    
-    def test_nonexistent_file_raises(self):
-        """Test that nonexistent file raises FileError."""
-        with pytest.raises(FileError, match="File not found"):
-            _prepare_file_data("/nonexistent/path/to/file.jpg")
-    
-    def test_image_file(self):
-        """Test preparing image file data."""
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            f.write(b"fake image data")
-            f.flush()
-            
-            try:
-                data = _prepare_file_data(f.name)
-                assert data["mime_type"] == "image/jpeg"
-                assert "data" in data
-                assert data["filename"].endswith(".jpg")
-            finally:
-                os.unlink(f.name)
-    
-    def test_pdf_file(self):
-        """Test preparing PDF file data."""
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            f.write(b"fake pdf data")
-            f.flush()
-            
-            try:
-                data = _prepare_file_data(f.name)
-                assert data["mime_type"] == "application/pdf"
-            finally:
-                os.unlink(f.name)
-    
-    def test_unknown_extension(self):
-        """Test that unknown extension uses octet-stream."""
-        with tempfile.NamedTemporaryFile(suffix=".xyz123", delete=False) as f:
-            f.write(b"unknown data")
-            f.flush()
-            
-            try:
-                data = _prepare_file_data(f.name)
-                assert data["mime_type"] == "application/octet-stream"
-            finally:
-                os.unlink(f.name)
 
 
 class TestPrepareFileLikeData:
@@ -291,16 +245,6 @@ class TestQueryFunction:
                 
                 # Config should have been modified
                 assert config.max_tokens == 1000    
-    def test_file_path_and_file_like_mutually_exclusive(self):
-        """Test that providing both file_path and file_like raises ConfigurationError."""
-        with patch("msgmodel.core._get_api_key") as mock_key:
-            mock_key.return_value = "sk-test"
-            
-            file_obj = io.BytesIO(b"test data")
-            
-            with pytest.raises(ConfigurationError, match="Cannot specify both file_path and file_like"):
-                query("openai", "Hello", file_path="/fake/path.txt", file_like=file_obj)
-    
     def test_file_like_parameter(self):
         """Test that file_like parameter is properly handled."""
         with patch("msgmodel.core._get_api_key") as mock_key:
@@ -326,16 +270,6 @@ class TestQueryFunction:
 
 class TestStreamFunction:
     """Tests for the stream function."""
-    
-    def test_file_path_and_file_like_mutually_exclusive(self):
-        """Test that providing both file_path and file_like raises ConfigurationError."""
-        with patch("msgmodel.core._get_api_key") as mock_key:
-            mock_key.return_value = "sk-test"
-            
-            file_obj = io.BytesIO(b"test data")
-            
-            with pytest.raises(ConfigurationError, match="Cannot specify both file_path and file_like"):
-                list(stream("openai", "Hello", file_path="/fake/path.txt", file_like=file_obj))
     
     def test_file_like_parameter(self):
         """Test that file_like parameter is properly handled in stream."""
