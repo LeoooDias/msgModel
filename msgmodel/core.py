@@ -220,6 +220,7 @@ def query(
     system_instruction: Optional[str] = None,
     file_path: Optional[str] = None,
     file_like: Optional[io.BytesIO] = None,
+    filename: Optional[str] = None,
     config: Optional[ProviderConfig] = None,
     max_tokens: Optional[int] = None,
     model: Optional[str] = None,
@@ -238,6 +239,8 @@ def query(
         system_instruction: Optional system instruction/prompt
         file_path: Optional path to a file (image, PDF, etc.)
         file_like: Optional file-like object (io.BytesIO) - must be seekable
+        filename: Optional filename hint for MIME type detection when using file_like.
+            If not provided, attempts to use file_like.name attribute. Defaults to 'upload.bin'
         config: Optional provider-specific configuration object
         max_tokens: Override for max tokens (convenience parameter)
         model: Override for model (convenience parameter)
@@ -267,8 +270,14 @@ def query(
         ...     "openai",
         ...     "Analyze this document",
         ...     file_like=file_obj,
+        ...     filename="document.pdf",  # Enables proper MIME type detection
         ...     system_instruction="You are a document analyst"
         ... )
+        
+        >>> # Using .name attribute on BytesIO (alternative to filename param)
+        >>> file_obj = io.BytesIO(binary_content)
+        >>> file_obj.name = "image.png"  # Set name attribute for MIME detection
+        >>> response = query("gemini", "Describe this image", file_like=file_obj)
     """
     # Normalize provider
     if isinstance(provider, str):
@@ -302,7 +311,9 @@ def query(
     if file_path:
         file_data = _prepare_file_data(file_path)
     elif file_like:
-        file_data = _prepare_file_like_data(file_like)
+        # Use provided filename, fall back to .name attribute, then default
+        file_hint = filename or getattr(file_like, 'name', 'upload.bin')
+        file_data = _prepare_file_like_data(file_like, filename=file_hint)
     
     # Check for unsupported providers
     if provider == Provider.CLAUDE:
@@ -367,6 +378,7 @@ def stream(
     system_instruction: Optional[str] = None,
     file_path: Optional[str] = None,
     file_like: Optional[io.BytesIO] = None,
+    filename: Optional[str] = None,
     config: Optional[ProviderConfig] = None,
     max_tokens: Optional[int] = None,
     model: Optional[str] = None,
@@ -385,6 +397,8 @@ def stream(
         system_instruction: Optional system instruction/prompt
         file_path: Optional path to a file (image, PDF, etc.)
         file_like: Optional file-like object (io.BytesIO) - must be seekable
+        filename: Optional filename hint for MIME type detection when using file_like.
+            If not provided, attempts to use file_like.name attribute. Defaults to 'upload.bin'
         config: Optional provider-specific configuration object
         max_tokens: Override for max tokens (convenience parameter)
         model: Override for model (convenience parameter)
@@ -416,8 +430,15 @@ def stream(
         ...     "openai",
         ...     "Analyze this uploaded file",
         ...     file_like=file_obj,
+        ...     filename="document.pdf",  # Enables proper MIME type detection
         ...     system_instruction="Provide detailed analysis"
         ... ):
+        ...     print(chunk, end="", flush=True)
+        
+        >>> # Gemini with BytesIO and .name attribute for MIME detection
+        >>> file_obj = io.BytesIO(image_bytes)
+        >>> file_obj.name = "photo.jpg"
+        >>> for chunk in stream("gemini", "Describe this photo", file_like=file_obj):
         ...     print(chunk, end="", flush=True)
     """
     # Normalize provider
@@ -452,7 +473,9 @@ def stream(
     if file_path:
         file_data = _prepare_file_data(file_path)
     elif file_like:
-        file_data = _prepare_file_like_data(file_like)
+        # Use provided filename, fall back to .name attribute, then default
+        file_hint = filename or getattr(file_like, 'name', 'upload.bin')
+        file_data = _prepare_file_like_data(file_like, filename=file_hint)
     
     # Check for unsupported providers
     if provider == Provider.CLAUDE:

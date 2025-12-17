@@ -359,3 +359,140 @@ class TestStreamFunction:
                 file_data = call_args[0][2]
                 assert file_data is not None
                 assert file_data["is_file_like"] is True
+
+
+class TestFilenameMimeTypeDetection:
+    """Tests for filename-based MIME type detection in query() and stream()."""
+    
+    def test_query_with_filename_parameter(self):
+        """Test query() passes filename parameter correctly for MIME type detection."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "sk-test"
+            
+            with patch("msgmodel.core.GeminiProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.query.return_value = {"output": []}
+                mock_instance.extract_text.return_value = "Analysis complete"
+                mock_provider.return_value = mock_instance
+                
+                file_obj = io.BytesIO(b"PDF binary content")
+                query("gemini", "Analyze this PDF", file_like=file_obj, filename="report.pdf")
+                
+                # Verify file_data has correct MIME type for PDF
+                call_args = mock_instance.query.call_args
+                file_data = call_args[0][2]
+                assert file_data["mime_type"] == "application/pdf"
+                assert file_data["filename"] == "report.pdf"
+    
+    def test_query_with_name_attribute(self):
+        """Test query() uses BytesIO.name attribute for MIME type detection."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "sk-test"
+            
+            with patch("msgmodel.core.OpenAIProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.query.return_value = {"output": []}
+                mock_instance.extract_text.return_value = "Image analysis"
+                mock_provider.return_value = mock_instance
+                
+                file_obj = io.BytesIO(b"image binary data")
+                file_obj.name = "photo.png"  # Set .name attribute
+                
+                query("openai", "Describe this image", file_like=file_obj)
+                
+                # Verify file_data uses .name attribute for MIME type
+                call_args = mock_instance.query.call_args
+                file_data = call_args[0][2]
+                assert file_data["mime_type"] == "image/png"
+                assert file_data["filename"] == "photo.png"
+    
+    def test_query_filename_parameter_overrides_name_attribute(self):
+        """Test that filename parameter takes precedence over .name attribute."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "sk-test"
+            
+            with patch("msgmodel.core.GeminiProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.query.return_value = {"output": []}
+                mock_instance.extract_text.return_value = "Done"
+                mock_provider.return_value = mock_instance
+                
+                file_obj = io.BytesIO(b"data")
+                file_obj.name = "wrong.txt"
+                
+                # Pass different filename parameter
+                query("gemini", "Analyze", file_like=file_obj, filename="correct.pdf")
+                
+                # Should use the filename parameter, not .name
+                call_args = mock_instance.query.call_args
+                file_data = call_args[0][2]
+                assert file_data["filename"] == "correct.pdf"
+                assert file_data["mime_type"] == "application/pdf"
+    
+    def test_stream_with_filename_parameter(self):
+        """Test stream() passes filename parameter correctly for MIME type detection."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "sk-test"
+            
+            with patch("msgmodel.core.GeminiProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.stream.return_value = iter(["Analyzing... ", "Done"])
+                mock_provider.return_value = mock_instance
+                
+                file_obj = io.BytesIO(b"image data")
+                list(stream("gemini", "Describe image", file_like=file_obj, filename="photo.jpg"))
+                
+                # Verify file_data has correct MIME type
+                call_args = mock_instance.stream.call_args
+                file_data = call_args[0][2]
+                assert file_data["mime_type"] == "image/jpeg"
+                assert file_data["filename"] == "photo.jpg"
+    
+    def test_stream_with_name_attribute(self):
+        """Test stream() uses BytesIO.name attribute for MIME type detection."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "sk-test"
+            
+            with patch("msgmodel.core.GeminiProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.stream.return_value = iter(["Processing..."])
+                mock_provider.return_value = mock_instance
+                
+                file_obj = io.BytesIO(b"pdf content")
+                file_obj.name = "document.pdf"
+                
+                list(stream("gemini", "Summarize this", file_like=file_obj))
+                
+                # Verify file_data uses .name attribute
+                call_args = mock_instance.stream.call_args
+                file_data = call_args[0][2]
+                assert file_data["mime_type"] == "application/pdf"
+                assert file_data["filename"] == "document.pdf"
+    
+    def test_filename_parameter_enables_proper_mime_types(self):
+        """Test that filename parameter enables proper MIME type detection for Gemini."""
+        with patch("msgmodel.core._get_api_key") as mock_key:
+            mock_key.return_value = "test-key"
+            
+            with patch("msgmodel.core.GeminiProvider") as mock_provider:
+                mock_instance = MagicMock()
+                mock_instance.stream.return_value = iter(["Result"])
+                mock_provider.return_value = mock_instance
+                
+                # Without filename, would get application/octet-stream
+                # With filename="document.pdf", should get application/pdf
+                file_obj = io.BytesIO(b"PDF binary data")
+                
+                list(stream(
+                    "gemini",
+                    "Analyze this PDF",
+                    file_like=file_obj,
+                    filename="document.pdf"  # Enables proper MIME type detection
+                ))
+                
+                call_args = mock_instance.stream.call_args
+                file_data = call_args[0][2]
+                
+                # Verify Gemini won't reject with application/octet-stream
+                assert file_data["mime_type"] != "application/octet-stream"
+                assert file_data["mime_type"] == "application/pdf"
