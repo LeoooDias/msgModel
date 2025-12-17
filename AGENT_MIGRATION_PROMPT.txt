@@ -1,0 +1,279 @@
+# The Exact Prompt to Give Your AI Agent for Project Migration
+
+Copy the content below and paste it into your AI development agent context when updating a project that uses msgmodel.
+
+---
+
+## COPY EVERYTHING BELOW THIS LINE
+
+```
+You are assisting with a library upgrade for the msgmodel Python package.
+
+CRITICAL CONTEXT:
+The project uses msgmodel v1.x and needs to be upgraded to v2.0.
+This is a BREAKING CHANGE release that removes optional privacy parameters.
+Your task is to update the project's code to be compatible with v2.0.
+
+## WHAT CHANGED IN msgmodel v2.0
+
+### Change 1: OpenAI - store_data Parameter Removed
+- BEFORE: from msgmodel import OpenAIConfig
+  config = OpenAIConfig(store_data=False)  # Optional parameter
+  
+- AFTER: from msgmodel import OpenAIConfig
+  config = OpenAIConfig()  # No store_data parameter
+  
+- ACTION: Find all OpenAIConfig() instantiations and remove the store_data parameter if present.
+- WHY: Zero Data Retention is now ALWAYS enforced and cannot be disabled.
+
+
+### Change 2: Gemini - use_paid_api Parameter Removed
+- BEFORE: from msgmodel import GeminiConfig
+  config = GeminiConfig(use_paid_api=True)  # Optional parameter
+  
+- AFTER: from msgmodel import GeminiConfig
+  config = GeminiConfig()  # No use_paid_api parameter
+  
+- ACTION: Find all GeminiConfig() instantiations and remove the use_paid_api parameter if present.
+- WHY: Paid tier is now REQUIRED and automatically verified.
+- REQUIREMENT: User's Google Cloud project must have:
+  * Cloud Billing account linked
+  * PAID API quota enabled (not free tier)
+  Billing verification will occur on first API call.
+
+
+### Change 3: Claude - No Longer Supported
+- BEFORE: response = query("claude", "prompt")  # Claude provider worked
+  OR: config = ClaudeConfig()
+  
+- AFTER: response = query("claude", "prompt")  # Raises ConfigurationError
+  Error message: "Claude is not supported in msgmodel."
+  
+- ACTION: Find all uses of Claude and migrate to OpenAI or Gemini.
+- WHY: Claude retains data for 30 days minimum (incompatible with zero-retention requirements).
+- ALTERNATIVES:
+  * OpenAI: response = query("openai", "prompt")  [RECOMMENDED: Zero data retention]
+  * Gemini: response = query("gemini", "prompt")  [PAID TIER ONLY: Abuse monitoring retention only]
+
+
+## YOUR TASK
+
+Search this codebase and:
+
+1. Find all OpenAIConfig instantiations
+   - Remove the store_data parameter (if present)
+   - Keep all other parameters unchanged
+
+2. Find all GeminiConfig instantiations
+   - Remove the use_paid_api parameter (if present)
+   - Keep all other parameters unchanged
+   - Add a note/comment that billing verification will happen on first API call
+
+3. Find all calls to query() or stream() with provider="claude" or provider='claude'
+   - Change to "openai" (recommended) OR "gemini" (requires paid quota)
+   - Add comments explaining the change
+
+4. Update any documentation, README, or comments that mention:
+   - store_data parameter
+   - use_paid_api parameter
+   - Claude as a supported provider
+   - Update examples to show new configuration
+
+5. Check configuration files (*.yaml, *.json, *.toml) for:
+   - store_data: false (remove)
+   - use_paid_api: true (remove)
+   - claude (change to openai or gemini)
+
+6. Check test files (test_*.py) for:
+   - Mock configurations using store_data (remove)
+   - Mock configurations using use_paid_api (remove)
+   - Tests that create ClaudeConfig (update or skip)
+   - Tests using provider="claude" (change to openai/gemini)
+
+## IMPORTANT NOTES
+
+- Do NOT change any other parameters (model, temperature, max_tokens, etc.)
+- Do NOT change the underlying logic or functionality
+- Do NOT change authentication (api_key still works the same way)
+- Do NOT change how prompts are passed or how responses are processed
+- Only remove/change the specific parameters mentioned above
+
+## FILE TYPES TO CHECK
+
+- Python source files: *.py
+- Configuration files: *.yaml, *.yml, *.json, *.toml, *.ini
+- Documentation: *.md, *.rst, *.txt
+- Test files: test_*.py, *_test.py, conftest.py
+
+## EXPECTED BEHAVIOR AFTER UPGRADE
+
+After your changes:
+- The project should import msgmodel v2.0 without errors
+- All OpenAIConfig() should work without store_data parameter
+- All GeminiConfig() should work without use_paid_api parameter
+- All Claude references should be migrated to OpenAI or Gemini
+- Code should compile and import successfully
+- Tests should still pass (except tests specifically for removed parameters)
+
+## REPORT FORMAT
+
+After making changes, provide:
+
+1. SUMMARY
+   - Total number of files modified
+   - Brief description of changes
+
+2. DETAILED CHANGES
+   - List each file modified
+   - Show what changed in each file (old → new)
+   - Count of changes per category (OpenAI, Gemini, Claude)
+
+3. REMOVED REFERENCES
+   - Count of store_data parameter removals
+   - Count of use_paid_api parameter removals
+   - Count of Claude provider migrations
+
+4. VERIFICATION
+   - Can the code be imported without errors? (Yes/No)
+   - Any remaining references to store_data? (Yes/No - show line numbers if yes)
+   - Any remaining references to use_paid_api? (Yes/No - show line numbers if yes)
+   - Any remaining references to Claude provider? (Yes/No - show line numbers if yes)
+
+5. SPECIAL NOTES
+   - Any code that couldn't be automatically updated and needs manual review?
+   - Any tests that were removed or need updating?
+   - Any documentation that requires additional context to update?
+
+Begin the migration now. Search the codebase and make the necessary changes.
+```
+
+## COPY EVERYTHING ABOVE THIS LINE
+
+---
+
+## How to Use This
+
+1. **Copy the prompt** (the section between the "COPY" markers)
+2. **Paste it into your AI agent** in the context of the project that uses msgmodel
+3. **Let it run** - it will search the codebase and make the changes
+4. **Review the output** - it will provide a detailed report of changes
+
+---
+
+## What You'll Get Back
+
+The AI agent will return something like:
+
+```
+## MIGRATION COMPLETE
+
+### SUMMARY
+- 8 files modified
+- 12 total changes made
+- No errors encountered
+
+### DETAILED CHANGES
+1. src/config.py
+   - Line 45: OpenAIConfig(store_data=False) → OpenAIConfig()
+   - Line 87: GeminiConfig(use_paid_api=True) → GeminiConfig()
+
+2. tests/test_openai.py
+   - Line 12: Removed store_data parameter from test fixture
+   - Line 45: Updated OpenAI test configuration
+
+3. docs/usage.md
+   - Line 156: Updated example (removed store_data)
+   - Line 234: Updated example (removed use_paid_api)
+
+... (more details) ...
+
+### REMOVED REFERENCES
+- OpenAI store_data removals: 3
+- Gemini use_paid_api removals: 2
+- Claude migrations to OpenAI: 0
+- Claude migrations to Gemini: 1
+
+### VERIFICATION
+- Code imports without errors: ✓ YES
+- Remaining store_data references: ✓ NONE
+- Remaining use_paid_api references: ✓ NONE
+- Remaining Claude provider references: ✓ NONE
+
+### SPECIAL NOTES
+None - all changes completed automatically.
+```
+
+---
+
+## After the Agent Completes
+
+**Manual verification**:
+
+```bash
+# 1. Check no references remain to removed parameters
+grep -r "store_data" . --include="*.py"    # Should return nothing
+grep -r "use_paid_api" . --include="*.py"  # Should return nothing
+
+# 2. Test imports work
+python3 -c "from msgmodel import OpenAIConfig, GeminiConfig; print('✓ OK')"
+
+# 3. Create configs to verify they work
+python3 << 'EOF'
+from msgmodel import OpenAIConfig, GeminiConfig
+
+# Should work
+config_openai = OpenAIConfig()
+print(f"✓ OpenAI config: {config_openai.model}")
+
+config_gemini = GeminiConfig()
+print(f"✓ Gemini config: {config_gemini.model}")
+
+# Should fail
+try:
+    config_bad = OpenAIConfig(store_data=False)
+    print("✗ store_data should have been rejected")
+except TypeError:
+    print("✓ store_data correctly rejected")
+EOF
+```
+
+---
+
+## Troubleshooting
+
+### AI Agent Says "Parameter Not Found"
+
+This is fine. It means that parameter wasn't being used in your code.
+
+**Example**:
+```
+- Gemini use_paid_api removals: 0 (parameter not used in this project)
+```
+
+### AI Agent Finds More Changes Than Expected
+
+Review them manually. Common reasons:
+- Comments mentioning the old parameter
+- Documentation examples
+- Variable names that coincidentally include "store_data"
+
+### AI Agent Doesn't Handle Gemini Billing Comments
+
+If your code has comments about billing verification, the agent may need guidance:
+
+```python
+# OLD
+config = GeminiConfig(use_paid_api=True)
+# This requires Google Cloud Billing
+
+# NEW (agent might need help with the comment)
+config = GeminiConfig()
+# This requires Google Cloud Billing (billing verified on first API call in v2.0)
+```
+
+---
+
+**Prompt Version**: 1.0  
+**For msgmodel**: v3.0.0  
+**Compatibility**: Works with any AI agent (Claude, ChatGPT, Gemini, etc.)  
+**Date Created**: December 16, 2025

@@ -79,21 +79,29 @@ class OpenAIConfig:
     """
     Configuration for OpenAI API calls.
     
+    **PRIVACY ENFORCEMENT**: Zero Data Retention (ZDR) is REQUIRED and non-negotiable.
+    The X-OpenAI-No-Store header is automatically added to all requests.
+    
+    OpenAI will NOT use your prompts or responses for model training or improvements.
+    See: https://platform.openai.com/docs/guides/zero-data-retention
+    
     Attributes:
         model: Model identifier (e.g., 'gpt-4o', 'gpt-4o-mini')
         temperature: Sampling temperature (0.0 to 2.0)
         top_p: Nucleus sampling parameter
         max_tokens: Maximum tokens to generate
         n: Number of completions to generate
-        store_data: Whether to allow OpenAI to store the data
-        delete_files_after_use: Whether to delete uploaded files after use
+        delete_files_after_use: Whether to delete uploaded files after use (default: True).
+                               Ensures cleanup of temporary files for statelessness.
+    
+    Note: store_data parameter has been removed. Zero Data Retention is enforced
+    for all requests and cannot be disabled.
     """
     model: str = "gpt-4o"
     temperature: float = 1.0
     top_p: float = 1.0
     max_tokens: int = 1000
     n: int = 1
-    store_data: bool = False
     delete_files_after_use: bool = True
 
 
@@ -101,6 +109,19 @@ class OpenAIConfig:
 class GeminiConfig:
     """
     Configuration for Google Gemini API calls.
+    
+    **PRIVACY ENFORCEMENT**: PAID API TIER IS REQUIRED AND ENFORCED.
+    
+    Gemini paid services (with active Google Cloud Billing and paid quota):
+    - Do NOT use your prompts or responses for model training
+    - Retain data temporarily for abuse detection only (24-72 hours)
+    - Provide near-stateless operation for sensitive materials
+    
+    UNPAID TIER IS NOT SUPPORTED. Google retains data indefinitely for training
+    on unpaid services. This library will verify paid access and raise an error
+    if you attempt to use unpaid quota.
+    
+    See: https://ai.google.dev/gemini-api/terms
     
     Attributes:
         model: Model identifier (e.g., 'gemini-2.5-flash', 'gemini-1.5-pro')
@@ -112,6 +133,9 @@ class GeminiConfig:
         safety_threshold: Content safety filtering level
         api_version: API version to use
         cache_control: Whether to enable caching
+    
+    Note: use_paid_api parameter has been removed. Paid tier is now required
+    and automatically enforced. Billing verification occurs on first use.
     """
     model: str = "gemini-2.5-flash"
     temperature: float = 1.0
@@ -129,13 +153,20 @@ class ClaudeConfig:
     """
     Configuration for Anthropic Claude API calls.
     
-    Attributes:
-        model: Model identifier (e.g., 'claude-sonnet-4-20250514', 'claude-3-opus-20240229')
-        temperature: Sampling temperature (0.0 to 1.0)
-        top_p: Nucleus sampling parameter
-        top_k: Top-k sampling parameter
-        max_tokens: Maximum tokens to generate
-        cache_control: Whether to enable caching
+    **NOT SUPPORTED**: Claude is excluded from this library.
+    
+    Reason: Claude retains data for up to 30 days for abuse prevention.
+    For sensitive information and privacy-critical applications, this retention
+    period is incompatible with zero-retention requirements.
+    
+    Supported alternatives:
+    - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring
+    - OpenAI: Zero data retention (non-negotiable enforcement)
+    
+    If you attempt to use Claude, you will receive a ConfigurationError
+    with instructions to use Gemini (paid) or OpenAI instead.
+    
+    See: https://www.anthropic.com/privacy
     """
     model: str = "claude-sonnet-4-20250514"
     temperature: float = 1.0

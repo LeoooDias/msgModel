@@ -3,11 +3,18 @@ msgmodel.providers.openai
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 OpenAI API provider implementation.
+
+ZERO DATA RETENTION (ZDR) - ENFORCED:
+- The X-OpenAI-No-Store header is ALWAYS sent with all requests.
+- This header instructs OpenAI not to store inputs and outputs for service improvements.
+- ZDR is non-negotiable and cannot be disabled.
+- See: https://platform.openai.com/docs/guides/zero-data-retention
 """
 
 import json
 import base64
 import logging
+import time
 from typing import Optional, Dict, Any, List, Iterator
 
 import requests
@@ -20,6 +27,10 @@ logger = logging.getLogger(__name__)
 # MIME type constants
 MIME_TYPE_JSON = "application/json"
 MIME_TYPE_PDF = "application/pdf"
+
+# Retry configuration for file deletion (to ensure cleanup)
+FILE_DELETE_MAX_RETRIES = 3
+FILE_DELETE_RETRY_DELAY = 0.5  # seconds
 
 
 class OpenAIProvider:
@@ -83,38 +94,113 @@ class OpenAIProvider:
         self._uploaded_file_ids.append(file_id)
         return file_id
     
-    def delete_file(self, file_id: str) -> bool:
+    def delete_file(self, file_id: str, max_retries: int = FILE_DELETE_MAX_RETRIES) -> bool:
         """
-        Delete a file from OpenAI Files API.
+        Delete a file from OpenAI Files API with retry logic.
+        
+        Implements exponential backoff to handle transient failures and ensure
+        files are cleaned up even if the API is temporarily unavailable.
         
         Args:
             file_id: The file ID to delete
+            max_retries: Maximum number of retry attempts (default: 3)
             
         Returns:
-            True if deletion was successful
+            True if deletion was successful, False if all retries exhausted
         """
         url = f"{OPENAI_FILES_URL}/{file_id}"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         
-        try:
-            response = requests.delete(url, headers=headers)
-            if response.ok:
-                if file_id in self._uploaded_file_ids:
-                    self._uploaded_file_ids.remove(file_id)
-                return True
-            else:
-                logger.warning(f"Failed to delete file {file_id}: {response.text}")
-                return False
-        except requests.RequestException as e:
-            logger.warning(f"Request exception while deleting file {file_id}: {e}")
-            return False
+        for attempt in range(max_retries):
+            try:
+                response = requests.delete(url, headers=headers, timeout=10)
+                if response.ok:
+                    if file_id in self._uploaded_file_ids:
+                        self._uploaded_file_ids.remove(file_id)
+                    logger.info(f"Successfully deleted file {file_id}")
+                    return True
+                elif response.status_code == 404:
+                    # File already deleted or doesn't exist
+                    if file_id in self._uploaded_file_ids:
+                        self._uploaded_file_ids.remove(file_id)
+                    logger.info(f"File {file_id} not found (already deleted)")
+                    return True
+                else:
+                    # Transient error, retry
+                    if attempt < max_retries - 1:
+                        wait_time = FILE_DELETE_RETRY_DELAY * (2 ** attempt)
+                        logger.warning(
+                            f"Delete file {file_id} failed (attempt {attempt + 1}/{max_retries}): "
+                            f"{response.status_code} - {response.text}. Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(
+                            f"Failed to delete file {file_id} after {max_retries} attempts: "
+                            f"{response.status_code} - {response.text}"
+                        )
+                        return False
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    wait_time = FILE_DELETE_RETRY_DELAY * (2 ** attempt)
+                    logger.warning(
+                        f"Request exception while deleting file {file_id} "
+                        f"(attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Request exception while deleting file {file_id} after {max_retries} attempts: {e}"
+                    )
+                    return False
+        
+        return False
     
     def cleanup(self) -> None:
-        """Delete all uploaded files if configured to do so."""
-        if self.config.delete_files_after_use:
-            for file_id in list(self._uploaded_file_ids):
-                if self.delete_file(file_id):
-                    logger.info(f"Deleted uploaded file {file_id}")
+        """
+        Delete all uploaded files if configured to do so.
+        
+        This ensures that temporary files uploaded to OpenAI are removed to maintain
+        statelessness. Failures are logged but do not raise exceptions to avoid
+        masking the original operation's success/failure.
+        """
+        if not self.config.delete_files_after_use:
+            return
+        
+        failed_deletions = []
+        for file_id in list(self._uploaded_file_ids):
+            if not self.delete_file(file_id):
+                failed_deletions.append(file_id)
+        
+        if failed_deletions:
+            logger.error(
+                f"Cleanup incomplete: Failed to delete {len(failed_deletions)} file(s): {failed_deletions}. "
+                f"Manual cleanup may be required."
+            )
+        else:
+            if self._uploaded_file_ids:
+                logger.info(f"All uploaded files cleaned up successfully")
+            self._uploaded_file_ids.clear()
+    
+    def _build_headers(self) -> Dict[str, str]:
+        """
+        Build HTTP headers for OpenAI API requests.
+        
+        ENFORCES Zero Data Retention (ZDR) by always including the X-OpenAI-No-Store header.
+        This header instructs OpenAI not to store inputs and outputs for service improvements.
+        
+        ZDR is non-negotiable and cannot be disabled.
+        
+        Returns:
+            Dictionary of HTTP headers with ZDR enforced
+        """
+        headers: Dict[str, str] = {
+            "Content-Type": MIME_TYPE_JSON,
+            "Authorization": f"Bearer {self.api_key}",
+            "X-OpenAI-No-Store": "true"  # ← ALWAYS enforced, no option to disable
+        }
+        
+        return headers
     
     def _build_content(
         self,
@@ -201,6 +287,10 @@ class OpenAIProvider:
         """
         Make a non-streaming API call to OpenAI.
         
+        With store_data=False (default), this request opts into Zero Data Retention (ZDR)
+        via the X-OpenAI-No-Store header, ensuring OpenAI does not store this interaction
+        for service improvements.
+        
         Args:
             prompt: The user prompt
             system_instruction: Optional system instruction
@@ -213,10 +303,7 @@ class OpenAIProvider:
             APIError: If the API call fails
         """
         payload = self._build_payload(prompt, system_instruction, file_data)
-        headers = {
-            "Content-Type": MIME_TYPE_JSON,
-            "Authorization": f"Bearer {self.api_key}"
-        }
+        headers = self._build_headers()
         
         try:
             response = requests.post(
@@ -245,6 +332,10 @@ class OpenAIProvider:
         """
         Make a streaming API call to OpenAI.
         
+        With store_data=False (default), this request opts into Zero Data Retention (ZDR)
+        via the X-OpenAI-No-Store header, ensuring OpenAI does not store this interaction
+        for service improvements.
+        
         Args:
             prompt: The user prompt
             system_instruction: Optional system instruction
@@ -258,10 +349,7 @@ class OpenAIProvider:
             StreamingError: If streaming fails
         """
         payload = self._build_payload(prompt, system_instruction, file_data, stream=True)
-        headers = {
-            "Content-Type": MIME_TYPE_JSON,
-            "Authorization": f"Bearer {self.api_key}"
-        }
+        headers = self._build_headers()
         
         try:
             response = requests.post(

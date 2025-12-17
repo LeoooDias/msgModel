@@ -38,9 +38,78 @@ class GeminiProvider:
         Args:
             api_key: Google API key for Gemini
             config: Optional configuration (uses defaults if not provided)
+            
+        Raises:
+            ConfigurationError: If billing verification fails or paid tier is not active
         """
         self.api_key = api_key
         self.config = config or GeminiConfig()
+        self._billing_verified = False
+        
+        # Verify paid API access on initialization
+        self._verify_paid_api_access()
+    
+    def _verify_paid_api_access(self) -> None:
+        """
+        Verify that the API key has access to paid Gemini services.
+        
+        Makes a minimal test request to confirm paid quota is active.
+        Raises ConfigurationError if billing verification fails.
+        
+        Raises:
+            ConfigurationError: If API access indicates unpaid tier or no billing
+            APIError: If the verification request fails for other reasons
+        """
+        try:
+            # Make a minimal test request to verify paid access
+            test_payload = {
+                "contents": [{"parts": [{"text": "[BILLING VERIFICATION]"}]}],
+                "generationConfig": {"maxOutputTokens": 10}
+            }
+            
+            url = (
+                f"{GEMINI_URL}/{self.config.api_version}/models/"
+                f"{self.config.model}:generateContent?key={self.api_key}"
+            )
+            headers = {"Content-Type": MIME_TYPE_JSON}
+            
+            response = requests.post(url, headers=headers, data=json.dumps(test_payload), timeout=5)
+            
+            # Check for specific error indicators of unpaid tier
+            if response.status_code == 429:
+                raise ConfigurationError(
+                    "BILLING VERIFICATION FAILED: Rate limit exceeded.\n"
+                    "This may indicate unpaid quota. Ensure your Google Cloud project has:\n"
+                    "  1. Cloud Billing account linked\n"
+                    "  2. PAID API quota enabled (not free tier)\n"
+                    "  3. Sufficient billing credits\n"
+                    "See: https://console.cloud.google.com/billing"
+                )
+            elif response.status_code == 403:
+                raise ConfigurationError(
+                    "BILLING VERIFICATION FAILED: Access denied (403).\n"
+                    "Ensure your API key has paid quota access:\n"
+                    "  1. Verify API key is valid\n"
+                    "  2. Confirm Cloud Billing is enabled\n"
+                    "  3. Check that paid quota is active (not free tier)\n"
+                    "See: https://console.cloud.google.com/billing"
+                )
+            elif not response.ok:
+                error_msg = response.text
+                raise APIError(
+                    f"Billing verification failed with status {response.status_code}: {error_msg}",
+                    status_code=response.status_code,
+                    response_text=error_msg
+                )
+            
+            self._billing_verified = True
+            logger.info("✓ Gemini paid API access verified. Data retention enforced to abuse monitoring only.")
+            
+        except requests.RequestException as e:
+            raise APIError(
+                f"Billing verification request failed: {e}. "
+                f"Ensure your Google Cloud project has paid API quota active."
+            )
     
     def _build_url(self, stream: bool = False) -> str:
         """Build the API endpoint URL."""

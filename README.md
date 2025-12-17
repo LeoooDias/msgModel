@@ -173,6 +173,126 @@ claude_config = ClaudeConfig(
 )
 ```
 
+## Data Retention & Privacy
+
+`msgmodel` is designed with **statelessness** as a core principle. Here's what you need to know:
+
+### OpenAI (Default: Zero Data Retention)
+
+When using OpenAI with `store_data=False` (the default):
+
+- **What's protected**: Input prompts, system instructions, and model responses
+- **How**: The `X-OpenAI-No-Store` header is automatically added to all Chat Completions requests
+- **Result**: OpenAI does **not** use these interactions for service improvements or model training
+- **Persistence**: Inputs/outputs are **not stored** beyond the immediate request-response cycle
+- **File retention**: Files uploaded for processing are **automatically deleted** after the request completes (unless `delete_files_after_use=False`)
+
+**Important limitations**:
+- OpenAI's **API logs** may retain minimal metadata (timestamps, API version, token counts) for ~30 days for debugging purposes, but not the actual content
+- **Billing records** will still show API usage but not interaction content
+- Enabling `store_data=True` disables ZDR and allows OpenAI to use your data for service improvements
+
+Example (ZDR enabled):
+```python
+from msgmodel import query, OpenAIConfig
+
+config = OpenAIConfig(
+    store_data=False,          # Enables Zero Data Retention (default)
+    delete_files_after_use=True  # Auto-delete uploaded files (default)
+)
+response = query("openai", "Sensitive prompt", config=config)
+```
+
+Example (Opt-out of ZDR):
+```python
+from msgmodel import query, OpenAIConfig
+
+config = OpenAIConfig(store_data=True)  # Disables ZDR
+response = query("openai", "Can use for training", config=config)
+```
+
+### Google Gemini (Service-Tier Dependent)
+
+Google Gemini's data retention policy **depends on which service tier you use**. No API parameter controls this; it's determined by your Google Cloud account configuration.
+
+#### Unpaid Services (Default: Free Tier, Google AI Studio)
+
+**When this applies**: You're using the free API quota without Cloud Billing enabled
+
+- **What's retained**: Prompts, system instructions, and all model responses
+- **How long**: Indefinitely (for model training and product improvement)
+- **Additional processing**: Human reviewers may read and annotate your prompts
+- **Statelessness**: ❌ **NOT POSSIBLE** — data is fundamentally retained for training
+
+**Configuration in msgmodel**:
+```python
+from msgmodel import query, GeminiConfig
+
+# Default (unpaid): Data IS retained for training
+config = GeminiConfig(use_paid_api=False)  # Default
+response = query("gemini", "Your prompt", config=config)
+# WARNING: Library will emit warning: "Gemini is configured for UNPAID SERVICES..."
+```
+
+#### Paid Services (Google Cloud Billing + Paid Quota)
+
+**When this applies**: Your Google Cloud project has Cloud Billing enabled AND you're using paid API quota
+
+- **What's protected**: Data is NOT used for model training or product improvement
+- **What IS retained**: Prompts and responses retained temporarily for abuse detection and legal compliance (typically 24-72 hours; exact duration unspecified by Google)
+- **Human review**: ❌ NO (unless abuse is detected)
+- **Statelessness**: ✅ **ACHIEVABLE** — within abuse monitoring requirements
+- **Backups**: Encrypted backups retained up to 6 months per Google's standard deletion process
+
+**Configuration in msgmodel**:
+```python
+from msgmodel import query, GeminiConfig
+
+# Paid services: Data protected from training, used only for abuse monitoring
+config = GeminiConfig(use_paid_api=True)
+response = query("gemini", "Sensitive prompt", config=config)
+# No warning; library assumes you have paid quota active
+```
+
+**Important**: Setting `use_paid_api=True` assumes your Google Cloud project has:
+1. Cloud Billing account linked
+2. Paid API quota enabled (not on free quota tier)
+
+If this is not the case, Google will apply unpaid service terms regardless of your code setting.
+
+**Learn more**: [Google Gemini API Terms — How Google Uses Your Data](https://ai.google.dev/gemini-api/terms)
+
+#### File Handling in Gemini
+
+- **Inline files** (msgmodel default): Base64-encoded files embedded in each request; **no persistent storage**; stateless by design ✅
+- **Google Files API** (not used by msgmodel): Would upload to Google's servers; 48-hour auto-delete; encrypted backup up to 6 months
+- **Verdict**: Current inline approach is **more privacy-preserving** for statelessness goals
+
+### Anthropic Claude
+
+- **Retention period**: Content retained for up to 30 days for abuse prevention
+- **No configuration available**: Google and Anthropic do not provide client-side controls for this
+- **Statelessness**: ❌ **NOT ACHIEVABLE** — 30-day minimum retention is inherent to the service
+
+See [Anthropic Privacy](https://www.anthropic.com/privacy) for details.
+
+### Summary Comparison
+
+| Provider | Statelessness Achievable | How | Caveat |
+|----------|--------------------------|-----|---------|
+| **OpenAI** | ✅ YES | `store_data=False` (default) | Zero-retention header; metadata ~30 days |
+| **Gemini (Paid)** | ✅ MOSTLY | Cloud Billing + `use_paid_api=True` | Abuse monitoring retention ~24-72 hours |
+| **Gemini (Unpaid)** | ❌ NO | No configuration possible | Data retained for training indefinitely |
+| **Claude** | ❌ NO | No configuration possible | 30-day minimum retention |
+
+For maximum privacy across all providers, consider:
+1. **OpenAI with ZDR**: True zero-retention option with `store_data=False` (default)
+2. **Gemini with Paid Services**: Near-stateless with Cloud Billing and `use_paid_api=True` (abuse monitoring only)
+3. **Running models locally** (e.g., Ollama, LLaMA)
+4. **Using on-premise deployments**
+
+For detailed privacy analysis of Gemini, see [GEMINI_PRIVACY_ANALYSIS.md](GEMINI_PRIVACY_ANALYSIS.md).
+
 ## Error Handling
 
 The library uses exceptions instead of `sys.exit()`:

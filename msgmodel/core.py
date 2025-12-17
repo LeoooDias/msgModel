@@ -247,6 +247,21 @@ def query(
     if file_path:
         file_data = _prepare_file_data(file_path)
     
+    # Check for unsupported providers
+    if provider == Provider.CLAUDE:
+        raise ConfigurationError(
+            "Claude is not supported in msgmodel.\n\n"
+            "REASON: Claude retains data for up to 30 days for abuse prevention.\n"
+            "This is incompatible with msgmodel's zero-retention privacy requirements.\n\n"
+            "ALTERNATIVES:\n"
+            "  - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring only\n"
+            "    • Requires Google Cloud Billing with paid API quota\n"
+            "    • See: https://ai.google.dev/gemini-api/terms\n\n"
+            "  - OpenAI: Zero data retention (enforced non-negotiably)\n"
+            "    • See: https://platform.openai.com/docs/guides/zero-data-retention\n\n"
+            "Use 'openai' or 'gemini' provider instead."
+        )
+    
     # Create provider instance and make request
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
@@ -355,6 +370,21 @@ def stream(
     if file_path:
         file_data = _prepare_file_data(file_path)
     
+    # Check for unsupported providers
+    if provider == Provider.CLAUDE:
+        raise ConfigurationError(
+            "Claude is not supported in msgmodel.\n\n"
+            "REASON: Claude retains data for up to 30 days for abuse prevention.\n"
+            "This is incompatible with msgmodel's zero-retention privacy requirements.\n\n"
+            "ALTERNATIVES:\n"
+            "  - Google Gemini (paid tier): ~24-72 hour retention for abuse monitoring only\n"
+            "    • Requires Google Cloud Billing with paid API quota\n"
+            "    • See: https://ai.google.dev/gemini-api/terms\n\n"
+            "  - OpenAI: Zero data retention (enforced non-negotiably)\n"
+            "    • See: https://platform.openai.com/docs/guides/zero-data-retention\n\n"
+            "Use 'openai' or 'gemini' provider instead."
+        )
+    
     # Create provider instance and stream
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
@@ -372,9 +402,4 @@ def stream(
     elif provider == Provider.GEMINI:
         assert isinstance(config, GeminiConfig)
         prov = GeminiProvider(key, config)
-        yield from prov.stream(prompt, system_instruction, file_data)
-        
-    else:  # Provider.CLAUDE
-        assert isinstance(config, ClaudeConfig)
-        prov = ClaudeProvider(key, config)
         yield from prov.stream(prompt, system_instruction, file_data)
