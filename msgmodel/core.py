@@ -253,9 +253,13 @@ def _prepare_file_like_data(file_like: io.BytesIO, filename: Optional[str] = Non
 def _validate_max_tokens(max_tokens: int) -> None:
     """Validate max_tokens parameter."""
     if max_tokens < 1:
-        raise ConfigurationError("max_tokens must be at least 1")
+        raise ConfigurationError("max_tokens must be at least 1", key_name="max_tokens")
     if max_tokens > 1000000:
-        logger.warning(f"max_tokens={max_tokens} is very large and may cause issues")
+        logger.warning(
+            "max_tokens=%d is very large and may cause issues",
+            max_tokens,
+            extra={"max_tokens": max_tokens, "warning_type": "large_value"}
+        )
 
 
 def query(

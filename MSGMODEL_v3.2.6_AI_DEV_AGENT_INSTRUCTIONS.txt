@@ -1,0 +1,255 @@
+# msgmodel v3.2.6 Migration Guide for AI Development Agents
+
+This document provides instructions for AI development agents working on projects that depend on msgmodel. Follow these guidelines to ensure compatibility with msgmodel v3.2.6.
+
+---
+
+## Breaking Changes Summary
+
+### 1. Exception Hierarchy Changes
+
+**Impact Level: LOW** - Mostly backward-compatible, but exception catching may need review.
+
+#### New Exception Types Added
+```python
+# New in v3.2.6
+from msgmodel import (
+    ValidationError,      # NEW: Input validation failures
+    RateLimitError,       # NEW: Rate limit exceeded (429)
+    ContextLengthError,   # NEW: Prompt too long
+    ServiceUnavailableError,  # NEW: Temporary outage (503)
+)
+```
+
+#### Exception Constructor Changes
+Exceptions now accept additional keyword arguments for better context:
+
+```python
+# v3.2.5 and earlier:
+raise APIError("Failed", 500, "response text")
+
+# v3.2.6 (STILL WORKS - backward compatible):
+raise APIError("Failed", 500, "response text")
+
+# v3.2.6 (NEW - with provider context):
+raise APIError("Failed", status_code=500, provider="openai", cause=original_error)
+```
+
+#### Migration Actions
+1. **Check exception catching code**: If you're catching `ProviderError`, note that it now inherits from `APIError` instead of directly from `MsgModelError`. Catching `APIError` will now catch provider errors.
+2. **Consider using new specific exceptions**: Replace generic `APIError` catches with specific types:
+   ```python
+   # Before
+   try:
+       response = query("openai", prompt)
+   except APIError as e:
+       if e.status_code == 429:
+           # handle rate limit
+   
+   # After (v3.2.6)
+   try:
+       response = query("openai", prompt)
+   except RateLimitError as e:
+       # Specific handling, retry_after available
+   except ServiceUnavailableError:
+       # Retry later
+   except APIError as e:
+       # Other API errors
+   ```
+
+---
+
+## New Features to Consider
+
+### 2. Retry Logic (Optional)
+
+v3.2.6 adds built-in retry support. If your project has custom retry logic for msgmodel calls, consider replacing it:
+
+```python
+from msgmodel import retry_on_transient_error, RETRY_DEFAULT
+
+# Decorator approach
+@retry_on_transient_error(max_retries=3, backoff_factor=1.0)
+def make_llm_call(prompt):
+    return query("openai", prompt)
+
+# Or use pre-configured settings
+@RETRY_AGGRESSIVE.decorator()  # 5 retries, faster backoff
+def aggressive_call(prompt):
+    return query("openai", prompt)
+```
+
+### 3. Input Validation (Optional)
+
+v3.2.6 provides validation utilities. Use them for early error detection:
+
+```python
+from msgmodel import validate_prompt, validate_api_key, ValidationError
+
+try:
+    validated_prompt = validate_prompt(user_input)
+    validated_key = validate_api_key(api_key, provider="openai")
+except ValidationError as e:
+    print(f"Invalid input for {e.field}: {e.message}")
+```
+
+### 4. Async Support (Optional)
+
+v3.2.6 adds async versions of `query()` and `stream()`. Requires `aiohttp`:
+
+```bash
+pip install msgmodel[async]
+# or
+pip install aiohttp
+```
+
+```python
+import asyncio
+from msgmodel import aquery, astream
+
+async def main():
+    # Async query
+    response = await aquery("openai", "Hello!")
+    
+    # Async streaming
+    async for chunk in astream("openai", "Tell me a story"):
+        print(chunk, end="", flush=True)
+
+asyncio.run(main())
+```
+
+---
+
+## Import Changes
+
+### New Exports from `msgmodel`
+
+```python
+# All new exports in v3.2.6
+from msgmodel import (
+    # New exceptions
+    ValidationError,
+    RateLimitError,
+    ContextLengthError,
+    ServiceUnavailableError,
+    
+    # Validation utilities
+    validate_prompt,
+    validate_temperature,
+    validate_max_tokens,
+    validate_top_p,
+    validate_api_key,
+    validate_model_name,
+    validate_timeout,
+    
+    # Retry utilities
+    retry_on_transient_error,
+    RetryConfig,
+    RETRY_DEFAULT,
+    RETRY_AGGRESSIVE,
+    RETRY_CONSERVATIVE,
+    
+    # Async (requires aiohttp)
+    aquery,
+    astream,
+)
+```
+
+---
+
+## Dependency Changes
+
+### New Optional Dependencies
+
+```toml
+# pyproject.toml or requirements.txt
+
+# For async support
+msgmodel[async]  # Installs aiohttp>=3.9.0
+
+# For all features
+msgmodel[all]    # Installs aiohttp + anthropic
+```
+
+---
+
+## Checklist for AI Agents
+
+When updating a project to msgmodel v3.2.6:
+
+- [ ] **Update msgmodel version** in requirements.txt/pyproject.toml to `>=3.2.6`
+- [ ] **Review exception handling**:
+  - [ ] Check if catching `ProviderError` - now inherits from `APIError`
+  - [ ] Consider using new specific exceptions (`RateLimitError`, etc.)
+- [ ] **Review custom retry logic** - consider using built-in retry decorator
+- [ ] **If using async code** - consider migrating to `aquery`/`astream`
+- [ ] **Run tests** to verify no regressions
+
+---
+
+## Common Patterns
+
+### Pattern 1: Robust API Call with Retry
+
+```python
+from msgmodel import query, retry_on_transient_error, RateLimitError
+
+@retry_on_transient_error(max_retries=3)
+def robust_query(prompt: str) -> str:
+    response = query("openai", prompt)
+    return response.text
+```
+
+### Pattern 2: Graceful Error Handling
+
+```python
+from msgmodel import (
+    query,
+    RateLimitError,
+    ContextLengthError,
+    ServiceUnavailableError,
+    AuthenticationError,
+    APIError,
+)
+
+def handle_query(prompt: str) -> str:
+    try:
+        return query("openai", prompt).text
+    except RateLimitError as e:
+        if e.retry_after:
+            time.sleep(e.retry_after)
+            return query("openai", prompt).text
+        raise
+    except ContextLengthError:
+        # Truncate prompt and retry
+        return query("openai", prompt[:4000]).text
+    except ServiceUnavailableError:
+        # Fallback to different provider
+        return query("gemini", prompt).text
+    except AuthenticationError:
+        raise  # Can't recover from this
+    except APIError as e:
+        logging.error(f"API error: {e.status_code}")
+        raise
+```
+
+### Pattern 3: Async Batch Processing
+
+```python
+import asyncio
+from msgmodel import aquery
+
+async def process_prompts(prompts: list[str]) -> list[str]:
+    tasks = [aquery("openai", p) for p in prompts]
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    return [r.text if hasattr(r, 'text') else str(r) for r in responses]
+```
+
+---
+
+## Questions?
+
+If you encounter issues not covered here, check:
+1. The exception you're catching - type hierarchy may have changed
+2. Whether you need the `[async]` extra for async functions
+3. The `msgmodel.__version__` to confirm v3.2.6 is installed

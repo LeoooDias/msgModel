@@ -20,9 +20,20 @@ With custom configuration:
     >>> from msgmodel import query, OpenAIConfig
     >>> config = OpenAIConfig(model="gpt-4o-mini", temperature=0.7)
     >>> response = query("openai", "Hello!", config=config)
+
+Async support (requires aiohttp):
+    >>> import asyncio
+    >>> from msgmodel import aquery, astream
+    >>> 
+    >>> async def main():
+    ...     response = await aquery("openai", "Hello!")
+    ...     async for chunk in astream("openai", "Tell me a story"):
+    ...         print(chunk, end="", flush=True)
+    >>> 
+    >>> asyncio.run(main())
 """
 
-__version__ = "3.2.3"
+__version__ = "3.2.6"
 __author__ = "Leo Dias"
 
 # Core API
@@ -36,15 +47,39 @@ from .config import (
     get_default_config,
 )
 
-# Exceptions
+# Exceptions (v3.2.6: Enhanced with more specific types)
 from .exceptions import (
     MsgModelError,
     ConfigurationError,
+    ValidationError,
     AuthenticationError,
     FileError,
     APIError,
     ProviderError,
+    RateLimitError,
+    ContextLengthError,
+    ServiceUnavailableError,
     StreamingError,
+)
+
+# Validation utilities (v3.2.6)
+from .validation import (
+    validate_prompt,
+    validate_temperature,
+    validate_max_tokens,
+    validate_top_p,
+    validate_api_key,
+    validate_model_name,
+    validate_timeout,
+)
+
+# Retry utilities (v3.2.6)
+from .retry import (
+    retry_on_transient_error,
+    RetryConfig,
+    RETRY_DEFAULT,
+    RETRY_AGGRESSIVE,
+    RETRY_CONSERVATIVE,
 )
 
 # Providers (for advanced usage)
@@ -53,6 +88,14 @@ from .providers import OpenAIProvider, GeminiProvider
 # Security (v3.2.1+)
 from .security import RequestSigner
 
+# Async support (v3.2.6) - lazy import to avoid requiring aiohttp
+def __getattr__(name: str):
+    """Lazy import for async functions to avoid requiring aiohttp."""
+    if name in ("aquery", "astream"):
+        from .async_core import aquery, astream
+        return aquery if name == "aquery" else astream
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
     # Version
     "__version__",
@@ -60,6 +103,9 @@ __all__ = [
     "query",
     "stream",
     "LLMResponse",
+    # Async API (v3.2.6)
+    "aquery",
+    "astream",
     # Configuration
     "Provider",
     "OpenAIConfig",
@@ -68,11 +114,29 @@ __all__ = [
     # Exceptions
     "MsgModelError",
     "ConfigurationError",
+    "ValidationError",
     "AuthenticationError",
     "FileError",
     "APIError",
     "ProviderError",
+    "RateLimitError",
+    "ContextLengthError",
+    "ServiceUnavailableError",
     "StreamingError",
+    # Validation (v3.2.6)
+    "validate_prompt",
+    "validate_temperature",
+    "validate_max_tokens",
+    "validate_top_p",
+    "validate_api_key",
+    "validate_model_name",
+    "validate_timeout",
+    # Retry (v3.2.6)
+    "retry_on_transient_error",
+    "RetryConfig",
+    "RETRY_DEFAULT",
+    "RETRY_AGGRESSIVE",
+    "RETRY_CONSERVATIVE",
     # Providers
     "OpenAIProvider",
     "GeminiProvider",
