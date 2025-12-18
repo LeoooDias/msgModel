@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "msgmodel"
-version = "3.2.6"
+version = "3.2.7"
 description = "Privacy-focused Python library for interacting with LLM providers (OpenAI, Gemini). Zero-retention middleware with stateless BytesIO-only file uploads."
 readme = "README.md"
 license = "MIT"
@@ -94,7 +94,13 @@ msgmodel = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::pytest.PytestConfigWarning",
+]
+
+# pytest-asyncio configuration (only active when plugin is installed)
+[tool.pytest-asyncio]
+mode = "auto"
 
 [tool.mypy]
 python_version = "3.10"

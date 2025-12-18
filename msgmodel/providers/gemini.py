@@ -111,6 +111,54 @@ class GeminiProvider:
                 f"Ensure your Google Cloud project has paid API quota active."
             )
     
+    @classmethod
+    def create_verified(cls, api_key: str, config: Optional[GeminiConfig] = None) -> "GeminiProvider":
+        """
+        Create a billing-verified GeminiProvider instance.
+        
+        This is the recommended factory method that ensures paid API access
+        is verified before any requests are made. Use this instead of direct
+        instantiation when privacy guarantees are critical.
+        
+        Args:
+            api_key: Google API key for Gemini
+            config: Optional configuration
+            
+        Returns:
+            A verified GeminiProvider instance
+            
+        Raises:
+            ConfigurationError: If billing verification fails
+        """
+        return cls(api_key, config)  # __init__ handles verification
+    
+    @classmethod
+    def create_with_cached_verification(cls, api_key: str, config: Optional[GeminiConfig] = None, 
+                                         verified: bool = False) -> "GeminiProvider":
+        """
+        Create a GeminiProvider with optional cached verification status.
+        
+        WARNING: Only use verified=True if you have ALREADY verified this API key
+        in the current session (e.g., from a prior sync call). Using verified=True
+        without prior verification bypasses privacy protections.
+        
+        Args:
+            api_key: Google API key for Gemini
+            config: Optional configuration
+            verified: If True, skip billing verification (USE WITH CAUTION)
+            
+        Returns:
+            A GeminiProvider instance
+        """
+        if verified:
+            # Create without triggering __init__'s verification
+            instance = cls.__new__(cls)
+            instance.api_key = api_key
+            instance.config = config or GeminiConfig()
+            instance._billing_verified = True
+            return instance
+        return cls(api_key, config)
+    
     def _build_url(self, stream: bool = False) -> str:
         """Build the API endpoint URL."""
         action = "streamGenerateContent" if stream else "generateContent"

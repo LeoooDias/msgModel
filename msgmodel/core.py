@@ -56,12 +56,32 @@ class LLMResponse:
         model: The model that generated the response
         provider: The provider that was used
         usage: Token usage information (if available)
+    
+    PRIVACY NOTE: The __repr__ and __str__ methods intentionally redact response
+    content to prevent accidental logging of sensitive data. Access .text or
+    .raw_response directly when you need the actual content.
+    
+    WARNING: Do not persist LLMResponse objects or raw_response to disk/database.
+    This violates the stateless, zero-retention design principle of msgmodel.
     """
     text: str
     raw_response: Dict[str, Any]
     model: str
     provider: str
     usage: Optional[Dict[str, int]] = None
+    
+    def __repr__(self) -> str:
+        """Privacy-safe representation that redacts response content."""
+        text_preview = f"{len(self.text)} chars" if self.text else "empty"
+        return (
+            f"LLMResponse(text=[REDACTED: {text_preview}], "
+            f"raw_response=[REDACTED], model={self.model!r}, "
+            f"provider={self.provider!r}, usage={self.usage})"
+        )
+    
+    def __str__(self) -> str:
+        """Privacy-safe string representation."""
+        return self.__repr__()
 
 
 def _get_api_key(

@@ -109,14 +109,16 @@ def retry_on_transient_error(
                     last_exception = e
                     
                     if attempt >= max_retries:
+                        # PRIVACY: Do not log error details - may contain prompt/response content
                         logger.warning(
-                            "Max retries (%d) exceeded for %s",
+                            "Max retries (%d) exceeded for %s: %s",
                             max_retries,
                             func.__name__,
+                            type(e).__name__,  # Only log exception type, not message
                             extra={
                                 "function": func.__name__,
                                 "attempts": attempt + 1,
-                                "error": str(e),
+                                "error_type": type(e).__name__,  # Redacted for privacy
                             }
                         )
                         raise
@@ -126,19 +128,20 @@ def retry_on_transient_error(
                     if isinstance(e, RateLimitError) and e.retry_after:
                         delay = max(delay, e.retry_after)
                     
+                    # PRIVACY: Do not log error details - may contain prompt/response content
                     logger.info(
                         "Retrying %s after %.2fs (attempt %d/%d): %s",
                         func.__name__,
                         delay,
                         attempt + 1,
                         max_retries,
-                        str(e),
+                        type(e).__name__,  # Only log exception type, not message
                         extra={
                             "function": func.__name__,
                             "attempt": attempt + 1,
                             "max_retries": max_retries,
                             "delay": delay,
-                            "error": str(e),
+                            "error_type": type(e).__name__,  # Redacted for privacy
                         }
                     )
                     

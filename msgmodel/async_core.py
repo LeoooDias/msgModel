@@ -203,6 +203,30 @@ async def _aquery_openai(
     )
 
 
+# Module-level cache for verified Gemini API keys (privacy-critical)
+_verified_gemini_keys: set = set()
+
+
+def _verify_gemini_billing_sync(api_key: str, config: GeminiConfig) -> None:
+    """
+    Synchronously verify Gemini billing status.
+    
+    PRIVACY CRITICAL: This ensures we only use paid Gemini API which does NOT
+    retain prompts for training. Unpaid API retains ALL data for model training.
+    
+    Results are cached per API key to avoid repeated verification calls.
+    """
+    global _verified_gemini_keys
+    
+    if api_key in _verified_gemini_keys:
+        return  # Already verified in this session
+    
+    from .providers.gemini import GeminiProvider
+    # This will raise ConfigurationError if billing check fails
+    _ = GeminiProvider(api_key, config)
+    _verified_gemini_keys.add(api_key)
+
+
 async def _aquery_gemini(
     api_key: str,
     prompt: str,
@@ -214,11 +238,14 @@ async def _aquery_gemini(
     """Make async query to Gemini."""
     from .providers.gemini import GeminiProvider
     
-    # Build payload using the sync provider's method
-    prov = GeminiProvider.__new__(GeminiProvider)
-    prov.api_key = api_key
-    prov.config = config
-    prov._billing_verified = True  # Skip sync billing check in async context
+    # PRIVACY CRITICAL: Verify paid API access before making any request
+    # This runs synchronously but is cached, so only the first call blocks
+    await asyncio.get_event_loop().run_in_executor(
+        None, _verify_gemini_billing_sync, api_key, config
+    )
+    
+    # Build payload using the sync provider's method (now safe - billing verified)
+    prov = GeminiProvider.create_with_cached_verification(api_key, config, verified=True)
     
     url = prov._build_url()
     payload = prov._build_payload(prompt, system_instruction, file_data)
@@ -406,11 +433,13 @@ async def _astream_gemini(
     """Make async streaming request to Gemini."""
     from .providers.gemini import GeminiProvider
     
-    # Create provider without billing check
-    prov = GeminiProvider.__new__(GeminiProvider)
-    prov.api_key = api_key
-    prov.config = config
-    prov._billing_verified = True
+    # PRIVACY CRITICAL: Verify paid API access before making any request
+    await asyncio.get_event_loop().run_in_executor(
+        None, _verify_gemini_billing_sync, api_key, config
+    )
+    
+    # Create provider with cached verification (now safe - billing verified)
+    prov = GeminiProvider.create_with_cached_verification(api_key, config, verified=True)
     
     url = prov._build_url(stream=True)
     payload = prov._build_payload(prompt, system_instruction, file_data)
