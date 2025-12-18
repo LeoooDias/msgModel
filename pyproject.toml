@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "msgmodel"
-version = "3.2.3"
+version = "3.2.4"
 description = "Privacy-focused Python library for interacting with LLM providers (OpenAI, Gemini). Zero-retention middleware with stateless BytesIO-only file uploads."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    {name = "Leo Dias", email = "leoodiass@outlook.com"}
+    {name = "Leo Dias", email = "lfdias@gmail.com"}
 ]
 maintainers = [
-    {name = "Leo Dias", email = "leoodiass@outlook.com"}
+    {name = "Leo Dias", email = "lfdias@gmail.com"}
 ]
 keywords = [
     "llm",
