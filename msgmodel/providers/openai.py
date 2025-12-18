@@ -120,41 +120,49 @@ class OpenAIProvider:
     
     def _supports_max_completion_tokens(self, model_name: str) -> bool:
         """
-        Check if model supports max_completion_tokens (GPT-4o and later).
+        Check if model supports max_completion_tokens (modern OpenAI standard).
         
-        Newer OpenAI models (GPT-4o, GPT-4 Turbo) use max_completion_tokens instead of max_tokens.
-        Legacy models still use max_tokens.
+        v3.2.1 Enhancement: Prefer max_completion_tokens for all models except known legacy ones.
+        This ensures compatibility with GPT-5, GPT-6, and future models automatically.
         
         Args:
             model_name: The model identifier
             
         Returns:
-            True if model uses max_completion_tokens, False if it uses max_tokens
+            True if model uses max_completion_tokens (default for new models),
+            False only for known legacy models that require max_tokens
         """
-        # Models that support max_completion_tokens (newer OpenAI models)
-        new_models = [
-            "gpt-4o",
-            "gpt-4-turbo",
-            "gpt-4-turbo-preview",
-            "gpt-4-turbo-2024",
-        ]
-        
-        # Models that only support max_tokens (legacy)
-        legacy_models = [
+        # Models that ONLY support max_tokens (legacy, pre-GPT-4o era)
+        # Check these first before checking prefixes
+        legacy_exact_matches = [
             "gpt-3.5-turbo",
             "gpt-4",
-            "gpt-4-0613",
-            "gpt-4-0125-preview",
-            "gpt-4-1106-preview",
         ]
         
-        # Check for exact match or prefix match for new models
-        for new_model in new_models:
-            if model_name == new_model or model_name.startswith(new_model):
-                return True
+        # If exact match to legacy model, use max_tokens
+        if model_name in legacy_exact_matches:
+            return False
         
-        # Default: use legacy max_tokens for safety
-        return False
+        # Check for legacy models with version suffixes
+        # gpt-3.5-turbo-0613, gpt-4-0613, etc.
+        legacy_prefixes_with_version = [
+            "gpt-3.5-turbo-",
+            "gpt-4-0",  # gpt-4-0613, gpt-4-0125-preview, etc. (but NOT gpt-4-turbo)
+        ]
+        
+        for legacy_prefix in legacy_prefixes_with_version:
+            if model_name.startswith(legacy_prefix):
+                # Make sure gpt-4-turbo is not caught by "gpt-4-0" check
+                if legacy_prefix == "gpt-4-0" and "turbo" in model_name:
+                    continue
+                return False
+        
+        # All other models use max_completion_tokens:
+        # - GPT-4o (all versions): gpt-4o, gpt-4o-mini, gpt-4o-2024-*
+        # - GPT-4-turbo (all versions): gpt-4-turbo, gpt-4-turbo-preview
+        # - GPT-5 and future models
+        # This future-proofs the implementation
+        return True
     
     def _build_payload(
         self,

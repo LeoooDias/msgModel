@@ -49,9 +49,15 @@ class TestOpenAIModelVersionDetection:
         assert self.provider._supports_max_completion_tokens("gpt-4-0613") is False
         assert self.provider._supports_max_completion_tokens("gpt-4-0125-preview") is False
     
-    def test_unknown_model_defaults_to_legacy(self):
-        """Test that unknown models default to legacy max_tokens."""
-        assert self.provider._supports_max_completion_tokens("gpt-future-unknown") is False
+    def test_unknown_model_uses_new_parameter(self):
+        """Test that unknown/future models default to max_completion_tokens.
+        
+        This ensures GPT-5, GPT-6, and other future models work automatically
+        without requiring code updates."""
+        assert self.provider._supports_max_completion_tokens("gpt-5") is True
+        assert self.provider._supports_max_completion_tokens("gpt-6") is True
+        assert self.provider._supports_max_completion_tokens("gpt-future-model") is True
+        assert self.provider._supports_max_completion_tokens("some-unknown-model") is True
 
 
 class TestMIMETypeInference:
