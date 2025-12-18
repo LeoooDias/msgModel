@@ -350,12 +350,13 @@ def query(
     if isinstance(provider, str):
         provider = Provider.from_string(provider)
     
-    # Get API key
-    key = _get_api_key(provider, api_key)
-    
     # Get or create config
     if config is None:
         config = get_default_config(provider)
+    
+    # Get API key: prioritize explicit api_key param, then config.api_key, then env/file
+    config_api_key = getattr(config, 'api_key', None)
+    key = _get_api_key(provider, api_key or config_api_key)
     
     # Apply convenience overrides
     if max_tokens is not None:
@@ -489,12 +490,13 @@ def stream(
             "Use file_path for disk files or file_like for in-memory BytesIO objects, not both."
         )
     
-    # Get API key
-    key = _get_api_key(provider, api_key)
-    
     # Get or create config
     if config is None:
         config = get_default_config(provider)
+    
+    # Get API key: prioritize explicit api_key param, then config.api_key, then env/file
+    config_api_key = getattr(config, 'api_key', None)
+    key = _get_api_key(provider, api_key or config_api_key)
     
     # Apply convenience overrides
     if max_tokens is not None:

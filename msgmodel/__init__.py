@@ -33,7 +33,7 @@ Async support (requires aiohttp):
     >>> asyncio.run(main())
 """
 
-__version__ = "3.2.7"
+__version__ = "3.2.8"
 __author__ = "Leo Dias"
 
 # Core API

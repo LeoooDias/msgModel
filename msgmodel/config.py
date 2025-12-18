@@ -85,6 +85,7 @@ class OpenAIConfig:
         top_p: Nucleus sampling parameter
         max_tokens: Maximum tokens to generate
         n: Number of completions to generate
+        api_key: Optional API key. If provided, overrides environment variable.
     
     Note: File uploads are only supported via inline base64-encoding in prompts.
     Files are limited to practical API size constraints (~15-20MB).
@@ -94,6 +95,7 @@ class OpenAIConfig:
     top_p: float = 1.0
     max_tokens: int = 1000
     n: int = 1
+    api_key: Optional[str] = None
 
 
 @dataclass
@@ -124,6 +126,7 @@ class GeminiConfig:
         safety_threshold: Content safety filtering level
         api_version: API version to use
         cache_control: Whether to enable caching
+        api_key: Optional API key. If provided, overrides environment variable.
     
     Note: File uploads are only supported via inline base64-encoding in prompts.
     Files are limited to practical API size constraints (~22MB).
@@ -137,6 +140,7 @@ class GeminiConfig:
     safety_threshold: str = "BLOCK_NONE"
     api_version: str = "v1beta"
     cache_control: bool = False
+    api_key: Optional[str] = None
 
 # Type alias for supported configs
 ProviderConfig = OpenAIConfig | GeminiConfig
