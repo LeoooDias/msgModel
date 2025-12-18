@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import sys
+import io
 import logging
 from pathlib import Path
 
@@ -66,18 +67,13 @@ Examples:
     )
     
     parser.add_argument(
-        "-f", "--prompt-file",
-        help="Read prompt from file instead of command line",
+        "-f", "--file",
+        help="Path to file to attach (image, PDF, text file, etc.) - file content is included in the request to the LLM",
     )
     
     parser.add_argument(
         "-i", "--instruction",
         help="System instruction (text or path to file)",
-    )
-    
-    parser.add_argument(
-        "-b", "--binary-file",
-        help="Path to binary file (image, PDF, etc.)",
     )
     
     parser.add_argument(
@@ -148,13 +144,11 @@ def main() -> int:
     
     try:
         # Get the prompt
-        if args.prompt:
-            prompt = args.prompt
-        elif args.prompt_file:
-            prompt = read_file_content(args.prompt_file)
-        else:
-            logger.error("Either prompt text or -f/--prompt-file is required")
+        if not args.prompt:
+            logger.error("Prompt text is required")
             return 1
+        
+        prompt = args.prompt
         
         # Get system instruction
         system_instruction = None
@@ -165,13 +159,28 @@ def main() -> int:
             else:
                 system_instruction = args.instruction
         
+        # Prepare file attachment if provided
+        file_like = None
+        filename = None
+        if args.file:
+            file_path = Path(args.file)
+            if not file_path.exists():
+                raise FileError(f"File not found: {args.file}")
+            
+            # Read file into BytesIO
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+            file_like = io.BytesIO(file_bytes)
+            filename = file_path.name
+        
         # Common kwargs
         kwargs = {
             "provider": args.provider,
             "prompt": prompt,
             "api_key": args.api_key,
             "system_instruction": system_instruction,
-            "file_path": args.binary_file,
+            "file_like": file_like,
+            "filename": filename,
             "max_tokens": args.max_tokens,
             "model": args.model,
             "temperature": args.temperature,

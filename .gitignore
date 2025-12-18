@@ -39,3 +39,6 @@ ENV/
 # Prompts and personas
 *.prompt
 *.instruction
+
+# Other stuff
+*.pdf
