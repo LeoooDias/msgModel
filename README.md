@@ -4,27 +4,28 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A unified Python library and CLI for interacting with multiple Large Language Model (LLM) providers with **privacy-first, zero-retention design**.
+A unified Python library and CLI for interacting with multiple Large Language Model (LLM) providers with a **simple, consistent syntax**.
 
 ## Overview
 
-`msgmodel` provides both a **Python library** and a **command-line interface** to interact with two major LLM providers:
-- **OpenAI** (GPT models) — Zero Data Retention enforced automatically
-- **Google Gemini** (Paid tier only) — Abuse-monitoring retention only
+`msgmodel` provides both a **Python library** and a **command-line interface** to interact with major LLM providers:
+- **OpenAI** (GPT models) — Zero Data Retention available via automatic header
+- **Google Gemini** (Paid tier recommended) — Configurable data policies
+- **Anthropic Claude** — Standard API data handling
 
-**Privacy Guarantee**: All files are processed via in-memory BytesIO objects with base64 inline encoding. No persistent file storage, no server-side uploads, no training data retention. OpenAI privacy is enforced automatically; Gemini privacy requires a paid API key (the only user requirement).
+**Core Principle**: msgmodel itself is entirely stateless and ephemeral—it never retains your data. Provider-level data handling varies; see the Data Retention section for details on each provider's policies and available options.
 
 ## Features
 
 - **Unified API**: Single `query()` and `stream()` functions work with all providers
 - **Library & CLI**: Use as a Python module or command-line tool
 - **Streaming support**: Stream responses in real-time
-- **File attachments**: Process images, PDFs, and text files with in-memory BytesIO only
+- **File attachments**: Process images, PDFs, and text files with in-memory BytesIO
 - **Flexible configuration**: Dataclass-based configs with sensible defaults
 - **Multiple API key sources**: Direct parameter, environment variable, or key file
 - **Exception-based error handling**: Clean errors, no `sys.exit()` in library code
 - **Type-safe**: Full type hints throughout
-- **Privacy-first**: Mandatory zero-retention enforcement, stateless design, BytesIO-only file transfers
+- **Stateless design**: msgmodel never retains your data; all processing is ephemeral
 
 ## Installation
 
@@ -90,8 +91,9 @@ response = query("openai", "Write a poem", config=config)
 python -m msgmodel -p openai "What is Python?"
 
 # Using shorthand provider codes
-python -m msgmodel -p g "Hello, Gemini!"  # g = gemini
-python -m msgmodel -p o "Hello, OpenAI!"  # o = openai
+python -m msgmodel -p g "Hello, Gemini!"    # g = gemini
+python -m msgmodel -p o "Hello, OpenAI!"    # o = openai
+python -m msgmodel -p c "Hello, Claude!"    # c = claude/anthropic
 
 # With streaming
 python -m msgmodel -p openai "Tell me a story" --stream
@@ -100,7 +102,7 @@ python -m msgmodel -p openai "Tell me a story" --stream
 python -m msgmodel -p gemini -f prompt.txt
 
 # With system instruction
-python -m msgmodel -p openai "Analyze this" -i "You are a data analyst"
+python -m msgmodel -p claude "Analyze this" -i "You are a data analyst"
 
 # With file attachment (base64 inline)
 python -m msgmodel -p gemini "Describe this" -b image.jpg
@@ -122,17 +124,19 @@ API keys can be provided in three ways (in order of priority):
 1. **Direct parameter**: `query("openai", "Hello", api_key="sk-...")`
 2. **Environment variable**:
    - `OPENAI_API_KEY` for OpenAI
-   - `GEMINI_API_KEY` for Gemini
+   - `GOOGLE_API_KEY` for Gemini
+   - `ANTHROPIC_API_KEY` for Claude/Anthropic
 3. **Key file** in current directory:
    - `openai-api.key`
    - `gemini-api.key`
+   - `anthropic-api.key`
 
 ## Configuration
 
 Each provider has its own configuration dataclass with sensible defaults:
 
 ```python
-from msgmodel import OpenAIConfig, GeminiConfig
+from msgmodel import OpenAIConfig, GeminiConfig, AnthropicConfig
 
 # OpenAI configuration
 openai_config = OpenAIConfig(
@@ -150,70 +154,85 @@ gemini_config = GeminiConfig(
     top_k=40,
     safety_threshold="BLOCK_NONE",
 )
+
+# Anthropic/Claude configuration
+anthropic_config = AnthropicConfig(
+    model="claude-haiku-4-5-20251001",  # Default; also: claude-sonnet-4-20250514
+    temperature=1.0,
+    top_p=1.0,
+    max_tokens=1000,
+)
 ```
 
 ## Data Retention & Privacy
 
-`msgmodel` is designed with **statelessness** as a core principle. Here's what you need to know:
+`msgmodel` is designed with **statelessness** as a core principle—the library itself never retains your data. Provider-level data handling varies, and this section helps you understand your options.
 
-### OpenAI (Zero Data Retention)
+### OpenAI (Zero Data Retention by Default)
 
 When using OpenAI:
 
-- **What's protected**: Input prompts, system instructions, and model responses
-- **How**: The `X-OpenAI-No-Store` header is automatically added to all Chat Completions requests
-- **Result**: OpenAI does **not** use these interactions for service improvements or model training
-- **Persistence**: Inputs/outputs are **not stored** beyond the immediate request-response cycle
-- **File handling**: All files are base64-encoded and embedded inline in prompts — no server-side uploads
+- **Default behavior**: The `X-OpenAI-No-Store` header is automatically sent, opting out of data retention for model training
+- **What this means**: OpenAI does **not** use these interactions for service improvements or model training
+- **File handling**: All files are base64-encoded and embedded inline in prompts—no server-side uploads
 
-**Important limitations**:
-- OpenAI's **API logs** may retain minimal metadata (timestamps, API version, token counts) for ~30 days for debugging purposes, but not the actual content
-- **Billing records** will still show API usage but not interaction content
+**Note**: OpenAI's API logs may retain minimal metadata (timestamps, API version, token counts) for ~30 days for debugging purposes, but not the actual prompt/response content.
 
-Example (ZDR enforced):
 ```python
 from msgmodel import query
 
-response = query("openai", "Sensitive prompt")
-# Zero Data Retention is enforced automatically by the X-OpenAI-No-Store header
+response = query("openai", "Your prompt here")
+# Zero Data Retention header is sent automatically
 ```
 
-### Google Gemini (Paid Tier Required)
+### Google Gemini
 
-Google Gemini's data retention policy **depends on which service tier you use**. No API parameter controls this; it's determined by your Google Cloud account configuration.
+Google Gemini's data retention policy depends on your service tier:
 
 **Paid Services (Google Cloud Billing + Paid Quota)**
+- Data is NOT used for model training or product improvement
+- Prompts and responses may be retained temporarily for abuse detection (typically 24-72 hours)
+- Base64-encoded inline file embedding—no persistent storage
 
-- **What's protected**: Data is NOT used for model training or product improvement
-- **What IS retained**: Prompts and responses retained temporarily for abuse detection only (typically 24-72 hours)
-- **Human review**: NO (unless abuse is detected)
-- **Statelessness**: ✅ ACHIEVABLE — within abuse monitoring requirements
-- **File handling**: Base64-encoded inline embedding — no persistent storage
+**Free Tier**
+- Google may retain data for model training. Review Google's terms if this matters for your use case.
 
 ```python
 from msgmodel import query
 
-# Paid tier: Data protected from training, used only for abuse monitoring
-response = query("gemini", "Sensitive prompt", api_key="your-api-key")
+# Gemini request - data handling depends on your account tier
+response = query("gemini", "Your prompt here", api_key="your-api-key")
 ```
 
-**Important**: Using Gemini assumes your Google Cloud project has:
-1. Cloud Billing account linked
-2. Paid API quota enabled (not on free quota tier)
+**Learn more**: [Google Gemini API Terms](https://ai.google.dev/gemini-api/terms)
 
-If not enabled, Google will apply unpaid service terms regardless of your code.
+### Anthropic Claude
 
-**Learn more**: [Google Gemini API Terms — How Google Uses Your Data](https://ai.google.dev/gemini-api/terms)
+When using Anthropic Claude:
+
+- **Default behavior**: Anthropic does not use API data for model training by default
+- **Data retention**: Data may be retained temporarily for safety monitoring and abuse prevention
+- **File handling**: Base64-encoded inline embedding
+
+```python
+from msgmodel import query
+
+response = query("claude", "Your prompt here")
+# or: query("anthropic", ...) or query("c", ...)
+```
+
+**Learn more**: [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
 
 ### Summary Comparison
 
-| Provider | Statelessness Achievable | How | Caveat |
-|----------|--------------------------|-----|---------|
-| **OpenAI** | ✅ YES | Automatic ZDR header | Metadata ~30 days |
-| **Gemini (Paid)** | ✅ MOSTLY | Cloud Billing + paid quota | Abuse monitoring ~24-72 hours |
-| **Gemini (Unpaid)** | ❌ NO | No configuration possible | Data retained for training indefinitely |
+| Provider | Training Data Opt-Out | Data Retention | Notes |
+|----------|----------------------|----------------|-------|
+| **OpenAI** | ✅ Automatic | None (ZDR header) | Metadata ~30 days |
+| **Gemini (Paid)** | ✅ Yes | ~24-72 hours (abuse monitoring) | Requires paid tier |
+| **Gemini (Free)** | ❌ No | Per Google's terms | Review terms |
+| **Anthropic** | ✅ Default | Temporary (safety) | Standard API behavior |
 
-For maximum privacy, use **OpenAI with zero-retention** (default) or **Gemini with paid Cloud Billing**.
+**For maximum privacy**: Use OpenAI with the default ZDR settings, or Anthropic's API. For Gemini, use the paid tier.
 
 ## File Uploads
 
@@ -241,15 +260,15 @@ response = query(
 )
 ```
 
-**Why BytesIO only?**
-- No disk persistence between requests
-- No server-side file uploads (Files API not used)
-- Better privacy—files never stored on provider servers
+**Why BytesIO?**
 - Stateless operation—each request is completely independent
+- No server-side file uploads (Files API not used)
+- Files are base64-encoded inline in prompts
 
 **File Size Limits**
 - **OpenAI**: ~15-20MB practical limit (base64 overhead + token limits)
 - **Gemini**: ~22MB practical limit (base64 overhead + token limits)
+- **Anthropic**: ~20MB practical limit (base64 overhead + token limits)
 
 If API returns a size-related error, the file exceeds practical limits for that provider.
 

@@ -18,6 +18,7 @@ class Provider(str, Enum):
     """Supported LLM providers."""
     OPENAI = "openai"
     GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
     
     @classmethod
     def from_string(cls, value: str) -> "Provider":
@@ -25,7 +26,7 @@ class Provider(str, Enum):
         Convert string to Provider enum.
         
         Args:
-            value: Provider name or shorthand ('o', 'g', 'openai', 'gemini')
+            value: Provider name or shorthand ('o', 'g', 'a', 'openai', 'gemini', 'anthropic')
             
         Returns:
             Provider enum member
@@ -39,17 +40,25 @@ class Provider(str, Enum):
         shortcuts = {
             'o': cls.OPENAI,
             'g': cls.GEMINI,
+            'a': cls.ANTHROPIC,
+            'c': cls.ANTHROPIC,  # 'claude' shorthand
         }
         
         if value in shortcuts:
             return shortcuts[value]
         
-        # Support full names
+        # Support full names and aliases
+        aliases = {
+            'claude': cls.ANTHROPIC,
+        }
+        if value in aliases:
+            return aliases[value]
+        
         for provider in cls:
             if provider.value == value:
                 return provider
         
-        valid = ", ".join([f"'{p.value}'" for p in cls] + ["'o'", "'g'"])
+        valid = ", ".join([f"'{p.value}'" for p in cls] + ["'o'", "'g'", "'a'", "'c'", "'claude'"])
         raise ValueError(f"Invalid provider '{value}'. Valid options: {valid}")
 
 
@@ -58,14 +67,17 @@ class Provider(str, Enum):
 # ============================================================================
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com"
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 # Environment variable names for API keys
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
-GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
+GEMINI_API_KEY_ENV = "GOOGLE_API_KEY"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 # Default API key file names (for backward compatibility)
 OPENAI_API_KEY_FILE = "openai-api.key"
 GEMINI_API_KEY_FILE = "gemini-api.key"
+ANTHROPIC_API_KEY_FILE = "anthropic-api.key"
 
 
 @dataclass
@@ -73,11 +85,8 @@ class OpenAIConfig:
     """
     Configuration for OpenAI API calls.
     
-    **PRIVACY ENFORCEMENT**: Zero Data Retention (ZDR) is REQUIRED and non-negotiable.
-    The X-OpenAI-No-Store header is automatically added to all requests.
-    
-    OpenAI will NOT use your prompts or responses for model training or improvements.
-    See: https://platform.openai.com/docs/guides/zero-data-retention
+    By default, the X-OpenAI-No-Store header is sent to opt out of data retention
+    for model training. See: https://platform.openai.com/docs/guides/zero-data-retention
     
     Attributes:
         model: Model identifier (e.g., 'gpt-4o', 'gpt-4o-mini')
@@ -103,16 +112,9 @@ class GeminiConfig:
     """
     Configuration for Google Gemini API calls.
     
-    **PRIVACY ENFORCEMENT**: PAID API TIER IS REQUIRED AND ENFORCED.
-    
-    Gemini paid services (with active Google Cloud Billing and paid quota):
-    - Do NOT use your prompts or responses for model training
-    - Retain data temporarily for abuse detection only (24-72 hours)
-    - Provide near-stateless operation for sensitive materials
-    
-    UNPAID TIER IS NOT SUPPORTED. Google retains data indefinitely for training
-    on unpaid services. This library will verify paid access and raise an error
-    if you attempt to use unpaid quota.
+    Data handling varies by account tier:
+    - Paid tier: Data is NOT used for model training; retained temporarily for abuse detection
+    - Free tier: Google may retain data for model training. Review Google's terms.
     
     See: https://ai.google.dev/gemini-api/terms
     
@@ -142,8 +144,38 @@ class GeminiConfig:
     cache_control: bool = False
     api_key: Optional[str] = None
 
+
+@dataclass
+class AnthropicConfig:
+    """
+    Configuration for Anthropic Claude API calls.
+    
+    **PRIVACY POLICY**: Claude API does not use prompts or responses for model training.
+    Data is retained temporarily for abuse prevention and safety monitoring only.
+    
+    See: https://www.anthropic.com/legal/privacy-notice
+    
+    Attributes:
+        model: Model identifier (e.g., 'claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514')
+        temperature: Sampling temperature (0.0 to 1.0)
+        top_p: Nucleus sampling parameter (0.0 to 1.0)
+        top_k: Top-k sampling parameter
+        max_tokens: Maximum tokens to generate
+        api_key: Optional API key. If provided, overrides environment variable.
+    
+    Note: File uploads are only supported via inline base64-encoding in prompts.
+    Files are limited to practical API size constraints (~20MB).
+    """
+    model: str = "claude-haiku-4-5-20251001"
+    temperature: float = 1.0
+    top_p: float = 1.0
+    top_k: int = 0
+    max_tokens: int = 1000
+    api_key: Optional[str] = None
+
+
 # Type alias for supported configs
-ProviderConfig = OpenAIConfig | GeminiConfig
+ProviderConfig = OpenAIConfig | GeminiConfig | AnthropicConfig
 
 
 def get_default_config(provider: Provider) -> ProviderConfig:
@@ -159,5 +191,6 @@ def get_default_config(provider: Provider) -> ProviderConfig:
     configs = {
         Provider.OPENAI: OpenAIConfig,
         Provider.GEMINI: GeminiConfig,
+        Provider.ANTHROPIC: AnthropicConfig,
     }
     return configs[provider]()

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "msgmodel"
-version = "3.3.1"
-description = "Privacy-focused Python library for interacting with LLM providers (OpenAI, Gemini). Zero-retention middleware with stateless BytesIO-only file uploads."
+version = "4.0.0"
+description = "Unified Python library for interacting with LLM providers (OpenAI, Gemini, Anthropic Claude). Simple, consistent syntax with stateless design."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -19,6 +19,8 @@ keywords = [
     "llm",
     "openai",
     "gemini",
+    "anthropic",
+    "claude",
     "gpt",
     "ai",
     "machine-learning",
@@ -96,6 +98,18 @@ testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = [
     "ignore::pytest.PytestConfigWarning",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise RuntimeError\\(\"Unexpected",  # Dead code safety net
+    "except ImportError:",  # Optional dependency imports
 ]
 
 # pytest-asyncio configuration (only active when plugin is installed)

@@ -129,6 +129,11 @@ class TestValidateTopP:
         """Test that > 1.0 raises ValidationError."""
         with pytest.raises(ValidationError, match="between"):
             validate_top_p(1.1)
+    
+    def test_non_number_raises(self):
+        """Test that non-number raises ValidationError."""
+        with pytest.raises(ValidationError, match="must be a number"):
+            validate_top_p("high")
 
 
 class TestValidateApiKey:
@@ -186,6 +191,11 @@ class TestValidateModelName:
         """Test that invalid characters raise ValidationError."""
         with pytest.raises(ValidationError, match="invalid characters"):
             validate_model_name("model name with spaces")
+    
+    def test_non_string_raises(self):
+        """Test that non-string raises ValidationError."""
+        with pytest.raises(ValidationError, match="must be a string"):
+            validate_model_name(12345)
 
 
 class TestValidateTimeout:
@@ -210,3 +220,17 @@ class TestValidateTimeout:
         """Test that > 1 hour raises ValidationError."""
         with pytest.raises(ValidationError, match="cannot exceed"):
             validate_timeout(3601)
+    
+    def test_non_number_raises(self):
+        """Test that non-number raises ValidationError."""
+        with pytest.raises(ValidationError, match="must be a number"):
+            validate_timeout("30 seconds")
+
+
+class TestValidateApiKeyAdditional:
+    """Additional tests for validate_api_key function."""
+    
+    def test_non_string_raises(self):
+        """Test that non-string raises ValidationError."""
+        with pytest.raises(ValidationError, match="must be a string"):
+            validate_api_key(12345)

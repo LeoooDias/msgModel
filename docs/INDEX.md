@@ -35,6 +35,16 @@ Complete documentation for the msgmodel library, organized by topic.
 
 ### Release & Version Information
 
+- [**RELEASE_NOTES_v4.0.0.md**](RELEASE_NOTES_v4.0.0.md) - Version 4.0.0 release notes ⭐ **LATEST**
+  - Breaking: `file_path` removed from `stream()`
+  - Breaking: `GEMINI_API_KEY` → `GOOGLE_API_KEY`
+  - Anthropic default model updated
+  - 100% test coverage achieved
+
+- [**RELEASE_NOTES_v3.2.1.md**](RELEASE_NOTES_v3.2.1.md) - Version 3.2.1 release notes
+
+- [**RELEASE_NOTES_v3.2.0.md**](RELEASE_NOTES_v3.2.0.md) - Version 3.2.0 release notes
+
 - [**RELEASE_NOTES_v3.0.0.md**](RELEASE_NOTES_v3.0.0.md) - Version 3.0.0 release notes
   - New features
   - Breaking changes
@@ -50,17 +60,25 @@ Complete documentation for the msgmodel library, organized by topic.
 
 ### Provider-Specific Information
 
+#### OpenAI
+- Zero Data Retention (ZDR) header sent by default
+- See: [OpenAI ZDR Documentation](https://platform.openai.com/docs/guides/zero-data-retention)
+
 #### Google Gemini
-- [**GEMINI_PRIVACY_ANALYSIS.md**](GEMINI_PRIVACY_ANALYSIS.md) - Gemini privacy analysis
-  - Data retention policies
-  - Privacy considerations
-  - Compliance information
+- [**GEMINI_PRIVACY_ANALYSIS.md**](GEMINI_PRIVACY_ANALYSIS.md) - Gemini data handling analysis
+  - Data retention policies by tier
+  - Configuration options
   - Best practices
 
 - [**GEMINI_QUICK_REFERENCE.md**](GEMINI_QUICK_REFERENCE.md) - Gemini API quick reference
   - Common patterns
   - Configuration options
   - Troubleshooting
+
+#### Anthropic Claude
+- Does not use API data for model training by default
+- Data retained temporarily for safety monitoring
+- See: [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
 
 ### Implementation Details
 
@@ -123,7 +141,9 @@ Complete documentation for the msgmodel library, organized by topic.
 - Review: [REVIEW_RESULTS.md](REVIEW_RESULTS.md)
 
 **Providers**
+- OpenAI: ZDR header sent by default - [OpenAI Documentation](https://platform.openai.com/docs/guides/zero-data-retention)
 - Gemini: [GEMINI_QUICK_REFERENCE.md](GEMINI_QUICK_REFERENCE.md), [GEMINI_PRIVACY_ANALYSIS.md](GEMINI_PRIVACY_ANALYSIS.md)
+- Anthropic: [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
 
 **Versions**
 - v3.0.0: [RELEASE_NOTES_v3.0.0.md](RELEASE_NOTES_v3.0.0.md)

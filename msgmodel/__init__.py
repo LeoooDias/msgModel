@@ -4,7 +4,8 @@ msgmodel
 
 A unified Python library for interacting with LLM providers.
 
-Supports OpenAI and Google Gemini with a single, consistent interface.
+Supports OpenAI, Google Gemini, and Anthropic Claude with a single, consistent interface.
+msgmodel itself is entirely stateless and ephemeral—it never retains your data.
 
 Basic usage:
     >>> from msgmodel import query
@@ -33,7 +34,7 @@ Async support (requires aiohttp):
     >>> asyncio.run(main())
 """
 
-__version__ = "3.3.1"
+__version__ = "4.0.0"
 __author__ = "Leo Dias"
 
 # Core API
@@ -44,8 +45,12 @@ from .config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
+    AnthropicConfig,
     get_default_config,
 )
+
+# Alias for CLI compatibility
+ClaudeConfig = AnthropicConfig
 
 # Exceptions (v3.2.6: Enhanced with more specific types)
 from .exceptions import (
@@ -83,7 +88,7 @@ from .retry import (
 )
 
 # Providers (for advanced usage)
-from .providers import OpenAIProvider, GeminiProvider
+from .providers import OpenAIProvider, GeminiProvider, AnthropicProvider
 
 # Security (v3.2.1+)
 from .security import RequestSigner
@@ -110,6 +115,8 @@ __all__ = [
     "Provider",
     "OpenAIConfig",
     "GeminiConfig",
+    "AnthropicConfig",
+    "ClaudeConfig",
     "get_default_config",
     # Exceptions
     "MsgModelError",
@@ -140,6 +147,7 @@ __all__ = [
     # Providers
     "OpenAIProvider",
     "GeminiProvider",
+    "AnthropicProvider",
     # Security
     "RequestSigner",
 ]

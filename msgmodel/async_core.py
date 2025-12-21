@@ -32,10 +32,12 @@ from .config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
+    AnthropicConfig,
     ProviderConfig,
     get_default_config,
     OPENAI_URL,
     GEMINI_URL,
+    ANTHROPIC_URL,
 )
 from .core import (
     _get_api_key,
@@ -245,7 +247,7 @@ async def _aquery_gemini(
     )
     
     # Build payload using the sync provider's method (now safe - billing verified)
-    prov = GeminiProvider.create_with_cached_verification(api_key, config, verified=True)
+    prov = GeminiProvider.create_with_cached_validation(api_key, config, verified=True)
     
     url = prov._build_url()
     payload = prov._build_payload(prompt, system_instruction, file_data)
@@ -439,7 +441,7 @@ async def _astream_gemini(
     )
     
     # Create provider with cached verification (now safe - billing verified)
-    prov = GeminiProvider.create_with_cached_verification(api_key, config, verified=True)
+    prov = GeminiProvider.create_with_cached_validation(api_key, config, verified=True)
     
     url = prov._build_url(stream=True)
     payload = prov._build_payload(prompt, system_instruction, file_data)

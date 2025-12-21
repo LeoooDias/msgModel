@@ -22,6 +22,7 @@ from . import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
+    AnthropicConfig,
     ClaudeConfig,
     MsgModelError,
     ConfigurationError,
@@ -50,14 +51,14 @@ Examples:
   %(prog)s -p openai "Hello, world!"
   %(prog)s -p gemini -f prompt.txt
   %(prog)s -p claude "Tell me a story" --stream
-  %(prog)s -p o "Analyze this" -i instructions.txt -b image.jpg
+  %(prog)s -p o "Analyze this" -i instructions.txt -f image.jpg
 """,
     )
     
     parser.add_argument(
         "-p", "--provider",
         required=True,
-        help="LLM provider: 'openai'/'o', 'gemini'/'g', or 'claude'/'c'",
+        help="LLM provider: 'openai'/'o', 'gemini'/'g', 'anthropic'/'a', or 'claude'/'c'",
     )
     
     parser.add_argument(

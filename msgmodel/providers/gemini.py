@@ -3,6 +3,17 @@ msgmodel.providers.gemini
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Google Gemini API provider implementation.
+
+DATA HANDLING:
+- Data retention policies vary based on your Google Cloud account tier.
+- Paid tier: Data is NOT used for model training; retained temporarily for abuse detection.
+- Free tier: Google may use data for model training. Review Google's terms.
+- See: https://ai.google.dev/gemini-api/terms
+
+FILE UPLOADS:
+- All file uploads are via inline base64-encoding in prompts
+- Files are limited to practical API size constraints (~22MB)
+- Provides stateless operation
 """
 
 import json
@@ -29,6 +40,7 @@ class GeminiProvider:
     Google Gemini API provider for making LLM requests.
     
     Handles API calls and response parsing for Gemini models.
+    All file uploads use inline base64-encoding for stateless operation.
     """
     
     def __init__(self, api_key: str, config: Optional[GeminiConfig] = None):
@@ -38,32 +50,28 @@ class GeminiProvider:
         Args:
             api_key: Google API key for Gemini
             config: Optional configuration (uses defaults if not provided)
-            
-        Raises:
-            ConfigurationError: If billing verification fails or paid tier is not active
         """
         self.api_key = api_key
         self.config = config or GeminiConfig()
-        self._billing_verified = False
+        self._api_validated = False
         
-        # Verify paid API access on initialization
-        self._verify_paid_api_access()
+        # Validate API access on initialization
+        self._validate_api_access()
     
-    def _verify_paid_api_access(self) -> None:
+    def _validate_api_access(self) -> None:
         """
-        Verify that the API key has access to paid Gemini services.
+        Validate that the API key has access to Gemini services.
         
-        Makes a minimal test request to confirm paid quota is active.
-        Raises ConfigurationError if billing verification fails.
+        Makes a minimal test request to confirm API access is working.
+        Logs information about data retention policies.
         
         Raises:
-            ConfigurationError: If API access indicates unpaid tier or no billing
-            APIError: If the verification request fails for other reasons
+            APIError: If the validation request fails
         """
         try:
-            # Make a minimal test request to verify paid access
+            # Make a minimal test request to verify access
             test_payload = {
-                "contents": [{"parts": [{"text": "[BILLING VERIFICATION]"}]}],
+                "contents": [{"parts": [{"text": "[API VALIDATION]"}]}],
                 "generationConfig": {"maxOutputTokens": 10}
             }
             
@@ -75,87 +83,73 @@ class GeminiProvider:
             
             response = requests.post(url, headers=headers, data=json.dumps(test_payload), timeout=5)
             
-            # Check for specific error indicators of unpaid tier
             if response.status_code == 429:
-                raise ConfigurationError(
-                    "BILLING VERIFICATION FAILED: Rate limit exceeded.\n"
-                    "This may indicate unpaid quota. Ensure your Google Cloud project has:\n"
-                    "  1. Cloud Billing account linked\n"
-                    "  2. PAID API quota enabled (not free tier)\n"
-                    "  3. Sufficient billing credits\n"
-                    "See: https://console.cloud.google.com/billing"
+                logger.warning(
+                    "Gemini rate limit exceeded. Consider upgrading to paid tier for higher limits."
                 )
+                # Don't fail - let the actual request handle rate limiting
             elif response.status_code == 403:
-                raise ConfigurationError(
-                    "BILLING VERIFICATION FAILED: Access denied (403).\n"
-                    "Ensure your API key has paid quota access:\n"
-                    "  1. Verify API key is valid\n"
-                    "  2. Confirm Cloud Billing is enabled\n"
-                    "  3. Check that paid quota is active (not free tier)\n"
-                    "See: https://console.cloud.google.com/billing"
+                raise APIError(
+                    f"Gemini API access denied (403). Verify your API key is valid.",
+                    status_code=403,
+                    response_text=response.text
                 )
             elif not response.ok:
                 error_msg = response.text
                 raise APIError(
-                    f"Billing verification failed with status {response.status_code}: {error_msg}",
+                    f"Gemini API validation failed with status {response.status_code}: {error_msg}",
                     status_code=response.status_code,
                     response_text=error_msg
                 )
             
-            self._billing_verified = True
-            logger.info("✓ Gemini paid API access verified. Data retention enforced to abuse monitoring only.")
+            self._api_validated = True
+            logger.debug("Gemini API access validated. Data handling depends on your account tier.")
             
         except requests.RequestException as e:
-            raise APIError(
-                f"Billing verification request failed: {e}. "
-                f"Ensure your Google Cloud project has paid API quota active."
-            )
+            raise APIError(f"Gemini API validation request failed: {e}")
     
     @classmethod
     def create_verified(cls, api_key: str, config: Optional[GeminiConfig] = None) -> "GeminiProvider":
         """
-        Create a billing-verified GeminiProvider instance.
+        Create a GeminiProvider instance with API validation.
         
-        This is the recommended factory method that ensures paid API access
-        is verified before any requests are made. Use this instead of direct
-        instantiation when privacy guarantees are critical.
+        This factory method validates API access before returning the instance.
         
         Args:
             api_key: Google API key for Gemini
             config: Optional configuration
             
         Returns:
-            A verified GeminiProvider instance
+            A validated GeminiProvider instance
             
         Raises:
-            ConfigurationError: If billing verification fails
+            APIError: If API validation fails
         """
-        return cls(api_key, config)  # __init__ handles verification
+        return cls(api_key, config)  # __init__ handles validation
     
     @classmethod
-    def create_with_cached_verification(cls, api_key: str, config: Optional[GeminiConfig] = None, 
-                                         verified: bool = False) -> "GeminiProvider":
+    def create_with_cached_validation(cls, api_key: str, config: Optional[GeminiConfig] = None, 
+                                       validated: bool = False) -> "GeminiProvider":
         """
-        Create a GeminiProvider with optional cached verification status.
+        Create a GeminiProvider with optional cached validation status.
         
-        WARNING: Only use verified=True if you have ALREADY verified this API key
-        in the current session (e.g., from a prior sync call). Using verified=True
-        without prior verification bypasses privacy protections.
+        Use validated=True only if you have already validated this API key
+        in the current session (e.g., from a prior sync call).
         
         Args:
             api_key: Google API key for Gemini
             config: Optional configuration
-            verified: If True, skip billing verification (USE WITH CAUTION)
+            validated: If True, skip API validation
             
         Returns:
             A GeminiProvider instance
         """
-        if verified:
-            # Create without triggering __init__'s verification
+        if validated:
+            # Create without triggering __init__'s validation
             instance = cls.__new__(cls)
             instance.api_key = api_key
             instance.config = config or GeminiConfig()
-            instance._billing_verified = True
+            instance._api_validated = True
             return instance
         return cls(api_key, config)
     
@@ -425,3 +419,21 @@ class GeminiProvider:
                     logger.info(f"Binary output written to: {filepath}")
         
         return saved_files
+    
+    @staticmethod
+    def get_privacy_info() -> Dict[str, Any]:
+        """
+        Get privacy and data handling information for this provider.
+        
+        Returns:
+            Dictionary with privacy metadata
+        """
+        return {
+            "provider": "gemini",
+            "training_retention": "depends_on_tier",
+            "data_retention": "Varies by account tier (paid: ~24-72 hours for abuse monitoring; free: may be retained for training)",
+            "enforcement_level": "tier_dependent",
+            "provider_policy": "Gemini paid tier does not use data for model training. Free tier terms differ - review Google's policies.",
+            "special_conditions": "Data handling depends on your Google Cloud account tier. Paid tier recommended for privacy-sensitive use cases.",
+            "reference": "https://ai.google.dev/gemini-api/terms"
+        }

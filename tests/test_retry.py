@@ -166,6 +166,57 @@ class TestRetryDecorator:
         assert result == "success"
         assert call_count == 2
     
+    def test_api_error_max_retries_exceeded(self):
+        """Test that APIError respects max retries."""
+        call_count = 0
+        
+        @retry_on_transient_error(max_retries=2, backoff_factor=0.01)
+        def always_fails():
+            nonlocal call_count
+            call_count += 1
+            raise APIError("Server overloaded", status_code=503)
+        
+        with pytest.raises(APIError) as exc_info:
+            always_fails()
+        
+        assert exc_info.value.status_code == 503
+        # Initial call + 2 retries = 3 total calls
+        assert call_count == 3
+    
+    def test_api_error_non_retryable_status(self):
+        """Test that APIError with non-retryable status is not retried."""
+        call_count = 0
+        
+        @retry_on_transient_error(max_retries=3, backoff_factor=0.01)
+        def api_error_400():
+            nonlocal call_count
+            call_count += 1
+            raise APIError("Bad request", status_code=400)
+        
+        with pytest.raises(APIError) as exc_info:
+            api_error_400()
+        
+        assert exc_info.value.status_code == 400
+        assert call_count == 1  # No retries
+    
+    def test_on_retry_callback_with_api_error(self):
+        """Test that on_retry callback is called for APIError."""
+        retry_calls = []
+        
+        def on_retry(exc, attempt, delay):
+            retry_calls.append((exc.status_code, attempt))
+        
+        @retry_on_transient_error(max_retries=2, backoff_factor=0.01, on_retry=on_retry)
+        def api_flaky():
+            if len(retry_calls) < 2:
+                raise APIError("Rate limited", status_code=429)
+            return "success"
+        
+        result = api_flaky()
+        assert result == "success"
+        assert len(retry_calls) == 2
+        assert retry_calls[0][0] == 429  # status_code
+    
     def test_on_retry_callback(self):
         """Test that on_retry callback is called."""
         retry_calls = []

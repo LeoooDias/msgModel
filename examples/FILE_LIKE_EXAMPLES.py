@@ -167,56 +167,59 @@ for chunk in stream(
 
 
 def example_6_comparison():
-    """Example 6: file_path vs file_like comparison"""
+    """Example 6: Why file_like is the only option (v4.0.0+)"""
     print("\n" + "=" * 70)
-    print("EXAMPLE 6: file_path vs file_like Comparison")
+    print("EXAMPLE 6: Why file_like is the Only Option (v4.0.0+)")
     print("=" * 70)
     
     print("""
 from msgmodel import query
 import io
 
+# In msgmodel v4.0.0+, file_like is the ONLY way to attach files.
+# The file_path parameter has been removed for these reasons:
+
 # ============================================================
-# APPROACH 1: Using file_path (disk-based)
+# BENEFITS OF file_like-ONLY APPROACH
 # ============================================================
-response1 = query(
-    provider="openai",
-    prompt="Analyze this file",
-    file_path="/path/to/file.pdf"  # Must exist on disk
+
+# 1. PRIVACY
+#    - No disk traces
+#    - Base64 inline encoding (no server-side file uploads)
+#    - Stateless operation
+
+# 2. API CONSISTENCY  
+#    - query() and stream() have identical signatures
+#    - One clear way to do things
+
+# 3. FLEXIBILITY
+#    - Works with web uploads (Flask/Django file objects)
+#    - Works with API responses
+#    - Works with downloaded content
+#    - Works with generated data
+
+# ============================================================
+# HOW TO USE
+# ============================================================
+
+# From a file on disk:
+with open("document.pdf", "rb") as f:
+    file_obj = io.BytesIO(f.read())
+
+response = query(
+    "openai",
+    "Analyze this file",
+    file_like=file_obj,
+    filename="document.pdf"  # Enables MIME type detection
 )
 
-# Pros:
-#   - Simple for existing files
-#   - Works with file system operations
-#
-# Cons:
-#   - Leaves traces on disk
-#   - Not suitable for uploaded files
-#   - Not suitable for in-memory data
+# From web upload (Flask example):
+# file_obj = io.BytesIO(request.files['upload'].read())
+# response = query("openai", "Analyze", file_like=file_obj, filename="upload.pdf")
 
-
-# ============================================================
-# APPROACH 2: Using file_like (memory-based)
-# ============================================================
-file_bytes = get_file_from_anywhere()
-file_obj = io.BytesIO(file_bytes)
-
-response2 = query(
-    provider="openai",
-    prompt="Analyze this file",
-    file_like=file_obj  # No disk access required
-)
-
-# Pros:
-#   - Privacy-focused (no disk traces)
-#   - Works with web uploads
-#   - Works with API responses
-#   - Can reuse multiple times
-#   - More efficient for streaming
-#
-# Cons:
-#   - Requires creating BytesIO object
-#   - Entire file loaded in memory (OK for most cases)
+# From API response:
+# file_obj = io.BytesIO(requests.get(url).content)
+# response = query("openai", "Analyze", file_like=file_obj, filename="data.json")
     """)
 
 
@@ -228,23 +231,10 @@ def example_7_error_handling():
     
     print("""
 from msgmodel import query
-from msgmodel.exceptions import ConfigurationError, FileError
+from msgmodel.exceptions import FileError
 import io
 
-# Error 1: Cannot use both file_path and file_like
-try:
-    query(
-        "openai",
-        "Hello",
-        file_path="/path/to/file",
-        file_like=io.BytesIO(b"data")  # ERROR!
-    )
-except ConfigurationError as e:
-    print(f"Error: {e}")
-    # Output: Cannot specify both file_path and file_like...
-
-
-# Error 2: Invalid file-like object
+# Error: Invalid file-like object
 class BadFile:
     def read(self):
         raise IOError("Cannot read")

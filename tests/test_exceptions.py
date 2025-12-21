@@ -193,6 +193,63 @@ class TestStreamingError:
         assert error.chunks_received == 42
 
 
+class TestStreamingErrorHelpers:
+    """Tests for StreamingError static helper methods."""
+    
+    def test_detect_error_in_chunk_valid(self):
+        """Test detecting error from a valid error chunk."""
+        chunk = {"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}}
+        error = StreamingError.detect_error_in_chunk(chunk)
+        assert error is not None
+        assert error["message"] == "Rate limit exceeded"
+    
+    def test_detect_error_in_chunk_no_error(self):
+        """Test detecting error when chunk has no error."""
+        chunk = {"choices": [{"delta": {"content": "Hello"}}]}
+        error = StreamingError.detect_error_in_chunk(chunk)
+        assert error is None
+    
+    def test_detect_error_in_chunk_invalid_format(self):
+        """Test detecting error from invalid chunk format."""
+        chunk = "not a dict"
+        error = StreamingError.detect_error_in_chunk(chunk)
+        assert error is None
+    
+    def test_detect_error_in_chunk_error_not_dict(self):
+        """Test when error field is not a dict."""
+        chunk = {"error": "just a string"}
+        error = StreamingError.detect_error_in_chunk(chunk)
+        assert error is None
+    
+    def test_is_rate_limit_error_openai(self):
+        """Test detecting OpenAI rate limit error."""
+        error = {"type": "rate_limit_error", "message": "Too many requests"}
+        assert StreamingError.is_rate_limit_error(error) is True
+    
+    def test_is_rate_limit_error_gemini(self):
+        """Test detecting Gemini rate limit error."""
+        error = {"status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}
+        assert StreamingError.is_rate_limit_error(error) is True
+    
+    def test_is_rate_limit_error_message_based(self):
+        """Test detecting rate limit via message keywords."""
+        error = {"message": "You have exceeded your rate limit"}
+        assert StreamingError.is_rate_limit_error(error) is True
+        
+        error = {"message": "Quota exhausted for today"}
+        assert StreamingError.is_rate_limit_error(error) is True
+    
+    def test_is_rate_limit_error_false(self):
+        """Test non-rate-limit error."""
+        error = {"type": "invalid_request_error", "message": "Bad request"}
+        assert StreamingError.is_rate_limit_error(error) is False
+    
+    def test_is_rate_limit_error_invalid_input(self):
+        """Test with invalid input."""
+        assert StreamingError.is_rate_limit_error("not a dict") is False
+        assert StreamingError.is_rate_limit_error(None) is False
+
+
 class TestExceptionCatching:
     """Tests for exception catching patterns."""
     

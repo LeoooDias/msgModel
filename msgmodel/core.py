@@ -20,12 +20,15 @@ from .config import (
     Provider,
     OpenAIConfig,
     GeminiConfig,
+    AnthropicConfig,
     ProviderConfig,
     get_default_config,
     OPENAI_API_KEY_ENV,
     GEMINI_API_KEY_ENV,
+    ANTHROPIC_API_KEY_ENV,
     OPENAI_API_KEY_FILE,
     GEMINI_API_KEY_FILE,
+    ANTHROPIC_API_KEY_FILE,
 )
 from .exceptions import (
     MsgModelError,
@@ -36,6 +39,7 @@ from .exceptions import (
 )
 from .providers.openai import OpenAIProvider
 from .providers.gemini import GeminiProvider
+from .providers.anthropic import AnthropicProvider
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +60,23 @@ class LLMResponse:
         model: The model that generated the response
         provider: The provider that was used
         usage: Token usage information (if available)
+        privacy: Data handling information for this specific interaction
     
-    PRIVACY NOTE: The __repr__ and __str__ methods intentionally redact response
-    content to prevent accidental logging of sensitive data. Access .text or
+    Note: The __repr__ and __str__ methods redact response content to prevent
+    accidental logging of potentially sensitive data. Access .text or
     .raw_response directly when you need the actual content.
     
-    WARNING: Do not persist LLMResponse objects or raw_response to disk/database.
-    This violates the stateless, zero-retention design principle of msgmodel.
+    The `privacy` field contains metadata about how this specific request
+    was handled regarding data retention by the provider.
+    
+    Note: msgmodel itself never retains data—each request is stateless and ephemeral.
     """
     text: str
     raw_response: Dict[str, Any]
     model: str
     provider: str
     usage: Optional[Dict[str, int]] = None
+    privacy: Optional[Dict[str, Any]] = None
     
     def __repr__(self) -> str:
         """Privacy-safe representation that redacts response content."""
@@ -76,7 +84,7 @@ class LLMResponse:
         return (
             f"LLMResponse(text=[REDACTED: {text_preview}], "
             f"raw_response=[REDACTED], model={self.model!r}, "
-            f"provider={self.provider!r}, usage={self.usage})"
+            f"provider={self.provider!r}, usage={self.usage}, privacy={self.privacy})"
         )
     
     def __str__(self) -> str:
@@ -113,11 +121,13 @@ def _get_api_key(
     env_vars = {
         Provider.OPENAI: OPENAI_API_KEY_ENV,
         Provider.GEMINI: GEMINI_API_KEY_ENV,
+        Provider.ANTHROPIC: ANTHROPIC_API_KEY_ENV,
     }
     
     key_files = {
         Provider.OPENAI: OPENAI_API_KEY_FILE,
         Provider.GEMINI: GEMINI_API_KEY_FILE,
+        Provider.ANTHROPIC: ANTHROPIC_API_KEY_FILE,
     }
     
     env_var = env_vars[provider]
@@ -233,10 +243,7 @@ def _prepare_file_like_data(file_like: io.BytesIO, filename: Optional[str] = Non
     Prepare file-like object data for API submission.
     
     Processes a BytesIO object entirely in memory (never touches disk).
-    This is the only supported method for file upload in msgmodel v3.2.1+
-    to ensure privacy and stateless operation.
-    
-    v3.2.1 Enhancement: Includes improved MIME type inference with magic byte fallback.
+    This provides stateless operation where each request is independent.
     
     Args:
         file_like: An io.BytesIO object containing binary data
@@ -301,14 +308,14 @@ def query(
     interface to all supported LLM providers.
     
     Args:
-        provider: The LLM provider ('openai' or 'gemini', or 'o', 'g')
+        provider: The LLM provider ('openai', 'gemini', 'anthropic', or 'o', 'g', 'a')
         prompt: The user prompt text
         api_key: API key (optional if set via env var or file)
         system_instruction: Optional system instruction/prompt
         file_like: Optional file-like object (io.BytesIO) - must be seekable
             This is the only method for file upload. Files are base64-encoded
             and embedded in prompts for privacy and stateless operation.
-            Limited to practical API constraints (~15-20MB for OpenAI, ~22MB for Gemini).
+            Limited to practical API constraints (~15-20MB for OpenAI, ~22MB for Gemini/Anthropic).
         filename: Optional filename hint for MIME type detection when using file_like.
             If not provided, attempts to use file_like.name attribute. Defaults to 'upload.bin'
         config: Optional provider-specific configuration object
@@ -317,7 +324,8 @@ def query(
         temperature: Override for temperature (convenience parameter)
     
     Returns:
-        LLMResponse containing the text response and metadata
+        LLMResponse containing the text response, metadata, and privacy information.
+        The `privacy` field contains details about data handling for this specific request.
     
     Raises:
         ConfigurationError: For invalid configuration
@@ -329,12 +337,13 @@ def query(
         >>> # Simple query with env var API key
         >>> response = query("openai", "Hello, world!")
         >>> print(response.text)
+        >>> print(response.privacy)  # Review privacy guarantees for this request
         
         >>> # Query with in-memory file (privacy-focused, no disk access)
         >>> import io
         >>> file_obj = io.BytesIO(binary_content)
         >>> response = query(
-        ...     "openai",
+        ...     "anthropic",
         ...     "Analyze this document",
         ...     file_like=file_obj,
         ...     filename="document.pdf",  # Enables proper MIME type detection
@@ -375,21 +384,31 @@ def query(
         file_data = _prepare_file_like_data(file_like, filename=file_hint)
     
     # Create provider instance and make request
+    privacy_metadata = None
     if provider == Provider.OPENAI:
         assert isinstance(config, OpenAIConfig)
         prov = OpenAIProvider(key, config)
         raw_response = prov.query(prompt, system_instruction, file_data)
         text = prov.extract_text(raw_response)
+        privacy_metadata = prov.get_privacy_info()
         
     elif provider == Provider.GEMINI:
         assert isinstance(config, GeminiConfig)
         prov = GeminiProvider(key, config)
         raw_response = prov.query(prompt, system_instruction, file_data)
         text = prov.extract_text(raw_response)
+        privacy_metadata = prov.get_privacy_info()
+    
+    elif provider == Provider.ANTHROPIC:
+        assert isinstance(config, AnthropicConfig)
+        prov = AnthropicProvider(key, config)
+        raw_response = prov.query(prompt, system_instruction, file_data)
+        text = prov.extract_text(raw_response)
+        privacy_metadata = prov.get_privacy_info()
     
     else:
         # Should never reach here due to Provider enum, but maintain type safety
-        raise ConfigurationError(f"Unsupported provider: {provider}")
+        raise ConfigurationError(f"Unsupported provider: {provider}")  # pragma: no cover
     
     # Extract usage info if available
     usage = None
@@ -402,6 +421,7 @@ def query(
         model=config.model,
         provider=provider.value,
         usage=usage,
+        privacy=privacy_metadata,
     )
 
 
@@ -410,7 +430,6 @@ def stream(
     prompt: str,
     api_key: Optional[str] = None,
     system_instruction: Optional[str] = None,
-    file_path: Optional[str] = None,
     file_like: Optional[io.BytesIO] = None,
     filename: Optional[str] = None,
     config: Optional[ProviderConfig] = None,
@@ -427,12 +446,13 @@ def stream(
     of waiting for the complete response.
     
     Args:
-        provider: The LLM provider ('openai', 'gemini', 'claude', or 'o', 'g', 'c')
+        provider: The LLM provider ('openai', 'gemini', 'anthropic', or 'o', 'g', 'a')
         prompt: The user prompt text
         api_key: API key (optional if set via env var or file)
         system_instruction: Optional system instruction/prompt
-        file_path: Optional path to a file (image, PDF, etc.)
-        file_like: Optional file-like object (io.BytesIO) - must be seekable
+        file_like: Optional file-like object (io.BytesIO) - must be seekable.
+            This is the only method for file upload. Files are base64-encoded
+            and embedded in prompts for privacy and stateless operation.
         filename: Optional filename hint for MIME type detection when using file_like.
             If not provided, attempts to use file_like.name attribute. Defaults to 'upload.bin'
         config: Optional provider-specific configuration object
@@ -457,15 +477,11 @@ def stream(
         >>> for chunk in stream("openai", "Tell me a story"):
         ...     print(chunk, end="", flush=True)
         
-        >>> # Stream with file attachment from disk
-        >>> for chunk in stream("gemini", "Summarize this PDF", file_path="document.pdf"):
-        ...     print(chunk, end="", flush=True)
-        
         >>> # Stream with in-memory file (privacy-focused, no disk access)
         >>> import io
         >>> file_obj = io.BytesIO(uploaded_file_bytes)
         >>> for chunk in stream(
-        ...     "openai",
+        ...     "anthropic",
         ...     "Analyze this uploaded file",
         ...     file_like=file_obj,
         ...     filename="document.pdf",  # Enables proper MIME type detection
@@ -482,13 +498,6 @@ def stream(
     # Normalize provider
     if isinstance(provider, str):
         provider = Provider.from_string(provider)
-    
-    # Check for mutually exclusive file parameters
-    if file_path is not None and file_like is not None:
-        raise ConfigurationError(
-            "Cannot specify both file_path and file_like. "
-            "Use file_path for disk files or file_like for in-memory BytesIO objects, not both."
-        )
     
     # Get or create config
     if config is None:
@@ -509,9 +518,7 @@ def stream(
     
     # Prepare file data if provided
     file_data = None
-    if file_path:
-        file_data = _prepare_file_data(file_path)
-    elif file_like:
+    if file_like:
         # Use provided filename, fall back to .name attribute, then default
         file_hint = filename or getattr(file_like, 'name', 'upload.bin')
         file_data = _prepare_file_like_data(file_like, filename=file_hint)
@@ -527,6 +534,11 @@ def stream(
         prov = GeminiProvider(key, config)
         yield from prov.stream(prompt, system_instruction, file_data, timeout=timeout, on_chunk=on_chunk)
     
+    elif provider == Provider.ANTHROPIC:
+        assert isinstance(config, AnthropicConfig)
+        prov = AnthropicProvider(key, config)
+        yield from prov.stream(prompt, system_instruction, file_data, timeout=timeout, on_chunk=on_chunk)
+    
     else:
         # Should never reach here due to Provider enum, but maintain type safety
-        raise ConfigurationError(f"Unsupported provider: {provider}")
+        raise ConfigurationError(f"Unsupported provider: {provider}")  # pragma: no cover

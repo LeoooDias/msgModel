@@ -81,21 +81,29 @@ async def upload_endpoint(file: UploadFile):
     """)
     print("✅ Ready to use!\n")
     
-    # Demo 5: Error handling
-    print("DEMO 5: Error handling (mutual exclusivity)")
+    # Demo 5: file_like is the only way
+    print("DEMO 5: file_like is the only way (v4.0.0+)")
     print("-" * 50)
     print("""
-# This raises ConfigurationError:
-query(
-    "openai",
-    "Hello",
-    file_path="/path/to/file",      # ❌ Can't use both
-    file_like=io.BytesIO(b"data")   # ❌
-)
+# In msgmodel v4.0.0+, file_like is the ONLY way to attach files.
+# This provides:
+#   ✓ Privacy: No disk traces, base64 inline encoding
+#   ✓ Consistency: Same API for query() and stream()
+#   ✓ Simplicity: One clear way to handle files
 
-# Error message:
-# ConfigurationError: Cannot specify both file_path and file_like.
-# Use file_path for disk files or file_like for in-memory BytesIO objects, not both.
+# Example:
+import io
+from msgmodel import query
+
+with open("document.pdf", "rb") as f:
+    file_obj = io.BytesIO(f.read())
+
+response = query(
+    "openai",
+    "Summarize this",
+    file_like=file_obj,
+    filename="document.pdf"
+)
     """)
     print()
     
@@ -118,7 +126,7 @@ For more examples, see:
   • FILE_LIKE_IMPLEMENTATION.md - Technical details
   • PRERELEASE_TESTING_REPORT.md - Full test report
 
-Next step: Deploy to PyPI as v3.1.0
+Next step: Deploy to PyPI as v4.0.0
     """)
 
 if __name__ == "__main__":

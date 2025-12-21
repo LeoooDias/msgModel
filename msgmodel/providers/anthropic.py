@@ -1,18 +1,18 @@
 """
-msgmodel.providers.openai
-~~~~~~~~~~~~~~~~~~~~~~~~~
+msgmodel.providers.anthropic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-OpenAI API provider implementation.
+Anthropic Claude API provider implementation.
 
 DATA HANDLING:
-- The X-OpenAI-No-Store header is sent by default with all requests.
-- This header instructs OpenAI not to store inputs and outputs for service improvements.
-- See: https://platform.openai.com/docs/guides/zero-data-retention
+- Anthropic does not use API inputs/outputs for model training by default.
+- Data may be retained temporarily for safety monitoring and abuse prevention.
+- See: https://www.anthropic.com/legal/privacy
 
 FILE UPLOADS:
-- All file uploads are via inline base64-encoding in prompts (no Files API)
-- Files are limited to practical API size constraints (~15-20MB)
-- Provides stateless operation
+- All file uploads are via inline base64-encoding in prompts
+- Files are limited to practical API size constraints (~20MB)
+- This approach provides stateless operation
 """
 
 import json
@@ -22,7 +22,7 @@ from typing import Optional, Dict, Any, Iterator, List, Callable
 
 import requests
 
-from ..config import OpenAIConfig, OPENAI_URL
+from ..config import AnthropicConfig, ANTHROPIC_URL
 from ..exceptions import APIError, ProviderError, StreamingError
 
 logger = logging.getLogger(__name__)
@@ -30,40 +30,40 @@ logger = logging.getLogger(__name__)
 # MIME type constants
 MIME_TYPE_JSON = "application/json"
 
+# Anthropic API version header
+ANTHROPIC_API_VERSION = "2023-06-01"
 
-class OpenAIProvider:
+
+class AnthropicProvider:
     """
-    OpenAI API provider for making LLM requests.
+    Anthropic Claude API provider for making LLM requests.
     
-    Handles API calls and response parsing for OpenAI models.
+    Handles API calls and response parsing for Claude models.
     All file uploads use inline base64-encoding for stateless operation.
     """
     
-    def __init__(self, api_key: str, config: Optional[OpenAIConfig] = None):
+    def __init__(self, api_key: str, config: Optional[AnthropicConfig] = None):
         """
-        Initialize the OpenAI provider.
+        Initialize the Anthropic provider.
         
         Args:
-            api_key: OpenAI API key
+            api_key: Anthropic API key
             config: Optional configuration (uses defaults if not provided)
         """
         self.api_key = api_key
-        self.config = config or OpenAIConfig()
+        self.config = config or AnthropicConfig()
     
     def _build_headers(self) -> Dict[str, str]:
         """
-        Build HTTP headers for OpenAI API requests.
-        
-        Includes the X-OpenAI-No-Store header by default, which opts out of
-        data retention for model training.
+        Build HTTP headers for Anthropic API requests.
         
         Returns:
             Dictionary of HTTP headers
         """
         headers: Dict[str, str] = {
             "Content-Type": MIME_TYPE_JSON,
-            "Authorization": f"Bearer {self.api_key}",
-            "X-OpenAI-No-Store": "true"  # Opt out of data retention by default
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_API_VERSION,
         }
         
         return headers
@@ -82,13 +82,27 @@ class OpenAIProvider:
             filename = file_data.get("filename", "input.bin")
             
             if mime_type.startswith("image/"):
+                # Anthropic supports image content blocks
                 content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime_type};base64,{encoded_data}"
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": encoded_data,
+                    }
+                })
+            elif mime_type == "application/pdf":
+                # Anthropic supports PDF documents
+                content.append({
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": encoded_data,
                     }
                 })
             elif mime_type.startswith("text/"):
+                # Decode text files and include as text content
                 try:
                     decoded_text = base64.b64decode(encoded_data).decode("utf-8", errors="ignore")
                 except Exception:
@@ -99,6 +113,7 @@ class OpenAIProvider:
                         "text": f"(Contents of {filename}):\n\n{decoded_text}"
                     })
             else:
+                # For unsupported MIME types, include a note
                 content.append({
                     "type": "text",
                     "text": (
@@ -108,58 +123,13 @@ class OpenAIProvider:
                     )
                 })
         
+        # Add the user prompt
         content.append({
             "type": "text",
             "text": prompt
         })
         
         return content
-    
-    def _supports_max_completion_tokens(self, model_name: str) -> bool:
-        """
-        Check if model supports max_completion_tokens (modern OpenAI standard).
-        
-        v3.2.1 Enhancement: Prefer max_completion_tokens for all models except known legacy ones.
-        This ensures compatibility with GPT-5, GPT-6, and future models automatically.
-        
-        Args:
-            model_name: The model identifier
-            
-        Returns:
-            True if model uses max_completion_tokens (default for new models),
-            False only for known legacy models that require max_tokens
-        """
-        # Models that ONLY support max_tokens (legacy, pre-GPT-4o era)
-        # Check these first before checking prefixes
-        legacy_exact_matches = [
-            "gpt-3.5-turbo",
-            "gpt-4",
-        ]
-        
-        # If exact match to legacy model, use max_tokens
-        if model_name in legacy_exact_matches:
-            return False
-        
-        # Check for legacy models with version suffixes
-        # gpt-3.5-turbo-0613, gpt-4-0613, etc.
-        legacy_prefixes_with_version = [
-            "gpt-3.5-turbo-",
-            "gpt-4-0",  # gpt-4-0613, gpt-4-0125-preview, etc. (but NOT gpt-4-turbo)
-        ]
-        
-        for legacy_prefix in legacy_prefixes_with_version:
-            if model_name.startswith(legacy_prefix):
-                # Make sure gpt-4-turbo is not caught by "gpt-4-0" check
-                if legacy_prefix == "gpt-4-0" and "turbo" in model_name:
-                    continue
-                return False
-        
-        # All other models use max_completion_tokens:
-        # - GPT-4o (all versions): gpt-4o, gpt-4o-mini, gpt-4o-2024-*
-        # - GPT-4-turbo (all versions): gpt-4-turbo, gpt-4-turbo-preview
-        # - GPT-5 and future models
-        # This future-proofs the implementation
-        return True
     
     def _build_payload(
         self,
@@ -168,28 +138,33 @@ class OpenAIProvider:
         file_data: Optional[Dict[str, Any]] = None,
         stream: bool = False
     ) -> Dict[str, Any]:
-        """Build the API request payload for OpenAI Chat Completions API."""
+        """Build the API request payload for Anthropic Messages API."""
         content = self._build_content(prompt, file_data)
         
-        # Build messages array with system message first (if provided)
-        messages: List[Dict[str, Any]] = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        messages.append({"role": "user", "content": content})
+        # Build messages array
+        messages: List[Dict[str, Any]] = [
+            {"role": "user", "content": content}
+        ]
         
         payload: Dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
-            "temperature": self.config.temperature,
-            "top_p": self.config.top_p,
+            "max_tokens": self.config.max_tokens,
         }
         
-        # Use appropriate max tokens parameter based on model version
-        # v3.2.1: Support both max_tokens (legacy) and max_completion_tokens (GPT-4o+)
-        if self._supports_max_completion_tokens(self.config.model):
-            payload["max_completion_tokens"] = self.config.max_tokens
-        else:
-            payload["max_tokens"] = self.config.max_tokens
+        # Add optional parameters
+        if self.config.temperature != 1.0:
+            payload["temperature"] = self.config.temperature
+        
+        if self.config.top_p != 1.0:
+            payload["top_p"] = self.config.top_p
+        
+        if self.config.top_k > 0:
+            payload["top_k"] = self.config.top_k
+        
+        # Add system instruction if provided
+        if system_instruction:
+            payload["system"] = system_instruction
         
         if stream:
             payload["stream"] = True
@@ -203,10 +178,7 @@ class OpenAIProvider:
         file_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Make a non-streaming API call to OpenAI.
-        
-        The X-OpenAI-No-Store header is sent by default, opting out of data
-        retention for model training.
+        Make a non-streaming API call to Anthropic.
         
         Args:
             prompt: The user prompt
@@ -224,7 +196,7 @@ class OpenAIProvider:
         
         try:
             response = requests.post(
-                OPENAI_URL,
+                ANTHROPIC_URL,
                 headers=headers,
                 data=json.dumps(payload)
             )
@@ -233,7 +205,7 @@ class OpenAIProvider:
         
         if not response.ok:
             raise APIError(
-                f"OpenAI API error: {response.text}",
+                f"Anthropic API error: {response.text}",
                 status_code=response.status_code,
                 response_text=response.text
             )
@@ -249,10 +221,7 @@ class OpenAIProvider:
         on_chunk: Optional[Callable[[str], bool]] = None
     ) -> Iterator[str]:
         """
-        Make a streaming API call to OpenAI.
-        
-        The X-OpenAI-No-Store header is sent by default, opting out of data
-        retention for model training.
+        Make a streaming API call to Anthropic.
         
         Args:
             prompt: The user prompt
@@ -273,20 +242,20 @@ class OpenAIProvider:
         
         try:
             response = requests.post(
-                OPENAI_URL,
+                ANTHROPIC_URL,
                 headers=headers,
                 data=json.dumps(payload),
                 stream=True,
                 timeout=timeout
             )
         except requests.Timeout:
-            raise StreamingError(f"OpenAI streaming request timed out after {timeout} seconds")
+            raise StreamingError(f"Anthropic streaming request timed out after {timeout} seconds")
         except requests.RequestException as e:
             raise APIError(f"Request failed: {e}")
         
         if not response.ok:
             raise APIError(
-                f"OpenAI API error: {response.text}",
+                f"Anthropic API error: {response.text}",
                 status_code=response.status_code,
                 response_text=response.text
             )
@@ -308,53 +277,55 @@ class OpenAIProvider:
                             if len(sample_chunks) < 3:
                                 sample_chunks.append(chunk)
                             
-                            # Check for error in stream (e.g., rate limiting)
-                            # Error structure: {"error": {"message": "...", "type": "..."}}
+                            # Check for error in stream
                             if "error" in chunk and isinstance(chunk.get("error"), dict):
                                 error_obj = chunk["error"]
                                 error_msg = error_obj.get("message", "Unknown error")
                                 error_type = error_obj.get("type", "unknown")
                                 
-                                # Check if it's a rate limit error
-                                if error_type == "rate_limit_error" or "rate_limit" in error_msg.lower():
+                                if error_type == "rate_limit_error" or "rate" in error_msg.lower():
                                     raise APIError(
-                                        f"OpenAI rate limit exceeded during streaming: {error_msg}",
+                                        f"Anthropic rate limit exceeded during streaming: {error_msg}",
                                         status_code=429,
                                         response_text=json.dumps(chunk),
-                                        provider="openai"
+                                        provider="anthropic"
                                     )
                                 else:
                                     raise APIError(
-                                        f"OpenAI API error during streaming ({error_type}): {error_msg}",
+                                        f"Anthropic API error during streaming ({error_type}): {error_msg}",
                                         status_code=None,
                                         response_text=json.dumps(chunk),
-                                        provider="openai"
+                                        provider="anthropic"
                                     )
                             
-                            # Extract text from OpenAI Chat Completions streaming response
-                            # Format: {"choices": [{"delta": {"content": "..."}}], ...}
-                            if "choices" in chunk and isinstance(chunk["choices"], list):
-                                for choice in chunk["choices"]:
-                                    if isinstance(choice, dict):
-                                        delta = choice.get("delta", {})
-                                        if isinstance(delta, dict):
-                                            text = delta.get("content", "")
-                                            if text:
-                                                chunks_received += 1
-                                                # v3.2.1: Support abort callback
-                                                if on_chunk is not None:
-                                                    should_continue = on_chunk(text)
-                                                    if should_continue is False:
-                                                        return
-                                                yield text
+                            # Extract text from Anthropic streaming response
+                            # Event types: content_block_delta with delta.text
+                            event_type = chunk.get("type", "")
+                            
+                            if event_type == "content_block_delta":
+                                delta = chunk.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    text = delta.get("text", "")
+                                    if text:
+                                        chunks_received += 1
+                                        if on_chunk is not None:
+                                            should_continue = on_chunk(text)
+                                            if should_continue is False:
+                                                return
+                                        yield text
+                            
+                            # Handle message_stop event
+                            if event_type == "message_stop":
+                                break
+                                
                         except json.JSONDecodeError:
                             continue
             
             # Raise error if no chunks were received
             if chunks_received == 0:
                 error_msg = (
-                    "No text chunks extracted from OpenAI streaming response. "
-                    "Response format may not match OpenAI Chat Completions delta structure "
+                    "No text chunks extracted from Anthropic streaming response. "
+                    "Response format may not match Anthropic streaming response structure "
                     "or stream may have ended prematurely."
                 )
                 if sample_chunks:
@@ -364,10 +335,8 @@ class OpenAIProvider:
                 
                 raise StreamingError(error_msg, chunks_received=0)
         except StreamingError:
-            # Re-raise StreamingError as-is
             raise
         except APIError:
-            # Re-raise APIError as-is
             raise
         except Exception as e:
             raise StreamingError(f"Streaming interrupted: {e}", chunks_received=chunks_received)
@@ -375,7 +344,7 @@ class OpenAIProvider:
     @staticmethod
     def extract_text(response: Dict[str, Any]) -> str:
         """
-        Extract text from an OpenAI Chat Completions response.
+        Extract text from an Anthropic Messages API response.
         
         Args:
             response: The raw API response
@@ -383,18 +352,17 @@ class OpenAIProvider:
         Returns:
             Extracted text content
         """
-        # OpenAI Chat Completions response format:
-        # {"choices": [{"message": {"content": "..."}}], ...}
-        if "choices" in response and isinstance(response["choices"], list):
-            for choice in response["choices"]:
-                if isinstance(choice, dict):
-                    message = choice.get("message", {})
-                    if isinstance(message, dict):
-                        content = message.get("content", "")
-                        if content:
-                            return content
+        # Anthropic Messages API response format:
+        # {"content": [{"type": "text", "text": "..."}], ...}
+        content = response.get("content", [])
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                if text:
+                    texts.append(text)
         
-        return ""
+        return "".join(texts)
     
     @staticmethod
     def get_privacy_info() -> Dict[str, Any]:
@@ -405,11 +373,11 @@ class OpenAIProvider:
             Dictionary with privacy metadata
         """
         return {
-            "provider": "openai",
+            "provider": "anthropic",
             "training_retention": False,
-            "data_retention": "None (Zero Data Retention header sent)",
+            "data_retention": "Temporary (for safety monitoring)",
             "enforcement_level": "default",
-            "provider_policy": "X-OpenAI-No-Store header sent by default, opting out of data retention for model training.",
-            "special_conditions": "ZDR header is sent automatically with all requests.",
-            "reference": "https://platform.openai.com/docs/guides/zero-data-retention"
+            "provider_policy": "Anthropic does not use API data for model training by default. Data may be retained temporarily for safety monitoring and abuse prevention.",
+            "special_conditions": "Review Anthropic's data retention policies if handling highly sensitive data.",
+            "reference": "https://www.anthropic.com/legal/privacy"
         }

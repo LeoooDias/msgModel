@@ -6,7 +6,102 @@ msgmodel has undergone significant architectural changes to prioritize **privacy
 
 ---
 
-## Version 3.2.0 (Current)
+## Version 4.0.0 (Current)
+
+### Breaking Changes
+
+#### 1. `file_path` Removed from `stream()` — file_like Only
+
+**What broke:**
+- The `file_path` parameter no longer exists in `stream()`
+- `stream()` now exclusively uses `file_like` for file attachments (same as `query()`)
+
+**Error you'll see:**
+```python
+for chunk in stream("openai", "Describe this", file_path="photo.jpg"):
+    print(chunk, end="")
+# TypeError: stream() got an unexpected keyword argument 'file_path'
+```
+
+**Migration:**
+```python
+# OLD (v3.x)
+for chunk in stream("openai", "Describe this", file_path="photo.jpg"):
+    print(chunk, end="")
+
+# NEW (v4.0.0+)
+import io
+
+with open("photo.jpg", "rb") as f:
+    file_obj = io.BytesIO(f.read())
+
+for chunk in stream("openai", "Describe this", file_like=file_obj, filename="photo.jpg"):
+    print(chunk, end="")
+```
+
+**Why this change:**
+- API consistency: Both `query()` and `stream()` now have identical file handling
+- Privacy: `file_like` with base64 encoding means no server-side file uploads
+- Simplicity: One way to do things = fewer bugs, clearer docs
+
+---
+
+#### 2. Gemini Environment Variable Renamed
+
+**What broke:**
+- `GEMINI_API_KEY` → `GOOGLE_API_KEY`
+
+**Error you'll see:**
+```python
+# If you only have GEMINI_API_KEY set
+response = query("gemini", "Hello")
+# AuthenticationError: Gemini API key not found
+```
+
+**Migration:**
+```bash
+# OLD
+export GEMINI_API_KEY="your-key"
+
+# NEW
+export GOOGLE_API_KEY="your-key"
+```
+
+**Why this change:**
+- Aligns with Google's official naming convention
+- Consistent with other Google Cloud tools
+
+---
+
+#### 3. Anthropic Default Model Updated
+
+**What changed:**
+- Default model: `claude-3-5-sonnet-20241022` → `claude-haiku-4-5-20251001`
+
+**Impact:**
+- If you relied on the default model, you'll get Claude Haiku 4.5 instead of Claude 3.5 Sonnet
+- Haiku is faster and cheaper; Sonnet is more capable
+
+**Migration (if you need Sonnet):**
+```python
+from msgmodel import query, AnthropicConfig
+
+# Explicitly specify the model you want
+config = AnthropicConfig(model="claude-sonnet-4-20250514")
+response = query("anthropic", "Hello", config=config)
+```
+
+---
+
+### Migration Checklist for v4.0.0
+
+- [ ] Replace any `file_path` in `stream()` calls with `file_like` + `filename`
+- [ ] Update `GEMINI_API_KEY` to `GOOGLE_API_KEY` in your environment
+- [ ] If using Anthropic, verify the new default model works for your use case (or explicitly set model)
+
+---
+
+## Version 3.2.0
 
 ### Major Breaks
 
@@ -117,63 +212,9 @@ response = query("openai", "Summarize this", file_like=file_obj, filename="docum
 
 ---
 
-#### 3. Claude/Anthropic Support Completely Removed
+#### 3. Configuration Changes (v3.2.0)
 
-**What broke:**
-- `ClaudeConfig` class removed entirely
-- `ClaudeProvider` class removed entirely
-- `Provider.CLAUDE` enum value removed
-- All Claude imports will fail
-- Attempting to use Claude will raise `ValueError`
-
-**Error you'll see:**
-```python
-# If you try to import ClaudeConfig
-from msgmodel import ClaudeConfig  # ❌ ImportError: cannot import name 'ClaudeConfig'
-
-# If you try to use Claude provider
-response = query("claude", "Hello")  # ❌ ValueError: Invalid provider 'claude'
-
-# If you try to create ClaudeConfig
-config = ClaudeConfig()  # ❌ NameError: name 'ClaudeConfig' is not defined
-```
-
-**Migration:**
-Switch to one of these providers:
-
-**Option 1: OpenAI (Recommended for zero-retention)**
-```python
-# OLD (v3.1.x)
-response = query("claude", "Hello", api_key=claude_key)
-
-# NEW (v3.2.0+) - Zero Data Retention enforced
-response = query("openai", "Hello", api_key=openai_key)
-```
-
-**Option 2: Google Gemini (Paid Tier - ~24-72h abuse monitoring retention)**
-```python
-# OLD (v3.1.x)
-response = query("claude", "Hello", api_key=claude_key)
-
-# NEW (v3.2.0+) - Requires Google Cloud Billing with paid quota
-response = query("gemini", "Hello", api_key=gemini_key)
-```
-
-**Why this change:**
-- Claude retains data for up to 30 days for abuse prevention
-- This is incompatible with msgmodel's zero-retention privacy requirements
-- Simplifies codebase and reduces maintenance burden
-
-**Privacy comparison:**
-| Provider | Retention | Recommendation |
-|----------|-----------|-----------------|
-| OpenAI | Zero (ZDR enforced) | ✅ Best for privacy |
-| Gemini (Paid) | ~24-72h (abuse monitoring only) | ✅ Good for privacy |
-| Claude | 30 days (abuse prevention) | ❌ Not supported |
-
----
-
-#### 4. Configuration Changes
+**Removed from OpenAIConfig:**
 
 **Removed from OpenAIConfig:**
 - `delete_files_after_use: bool` parameter (no longer applicable)
@@ -249,32 +290,26 @@ def query(
 
 ---
 
-### Summary Table
+### Summary Table (v3.2.0)
 
 | Item | v3.1.x | v3.2.0+ | Status |
 |------|--------|---------|--------|
 | `file_path` param in `query()` | ✅ Supported | ❌ Removed | **Breaking** |
-| `file_path` param in `stream()` | ✅ Supported | ❌ Removed | **Breaking** |
 | `file_like` param in `query()` | ✅ Supported | ✅ Supported | OK |
 | `file_like` param in `stream()` | ✅ Supported | ✅ Supported | OK |
 | `OpenAIProvider.upload_file()` | ✅ Available | ❌ Removed | **Breaking** |
 | `OpenAIProvider.delete_file()` | ✅ Available | ❌ Removed | **Breaking** |
 | `OpenAIProvider.cleanup()` | ✅ Available | ❌ Removed | **Breaking** |
 | `delete_files_after_use` config | ✅ Parameter | ❌ Removed | **Breaking** |
-| Claude/Anthropic support | ✅ Supported | ❌ Removed | **Breaking** |
-| `ClaudeConfig` class | ✅ Available | ❌ Removed | **Breaking** |
-| `ClaudeProvider` class | ✅ Available | ❌ Removed | **Breaking** |
-| `Provider.CLAUDE` enum | ✅ Available | ❌ Removed | **Breaking** |
 | OpenAI ZDR enforcement | ✅ Enforced | ✅ Enforced | OK |
-| Gemini paid tier requirement | ✅ Required | ✅ Required | OK |
 
 ---
 
-## Migration Checklist
+## Migration Checklist (v3.1.x → v3.2.0)
 
 Use this checklist to migrate your code to v3.2.0:
 
-- [ ] Remove all `file_path` parameters from `query()` and `stream()` calls
+- [ ] Remove all `file_path` parameters from `query()` calls
 - [ ] Convert all disk file access to BytesIO:
   ```python
   # Old
@@ -286,11 +321,7 @@ Use this checklist to migrate your code to v3.2.0:
   ```
 - [ ] Remove any calls to `provider.upload_file()`, `provider.delete_file()`, `provider.cleanup()`
 - [ ] Remove `delete_files_after_use` parameter from any `OpenAIConfig` instantiations
-- [ ] Replace all `claude` provider calls with `openai` or `gemini`
-- [ ] Remove `from msgmodel import ClaudeConfig` imports
 - [ ] Update tests to use `file_like` parameter instead of `file_path`
-- [ ] Review error messages for any references to removed functionality
-- [ ] Test with files up to ~15-20MB (OpenAI) or ~22MB (Gemini)
 
 ---
 
@@ -332,17 +363,15 @@ with open("large_file.pdf", "rb") as f:
 ```python
 from msgmodel import query
 
-# ✅ This works
+# ✅ All of these work
 response = query("openai", "Hello")
-response = query("o", "Hello")  # shorthand
+response = query("o", "Hello")        # shorthand
 response = query("gemini", "Hello")
-response = query("g", "Hello")  # shorthand
-
-# ❌ This raises ValueError
-try:
-    response = query("claude", "Hello")
-except ValueError as e:
-    print(f"Expected error: {e}")
+response = query("g", "Hello")        # shorthand
+response = query("anthropic", "Hello")
+response = query("a", "Hello")        # shorthand
+response = query("claude", "Hello")   # alias for anthropic
+response = query("c", "Hello")        # shorthand
 ```
 
 ---

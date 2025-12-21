@@ -182,9 +182,9 @@ def retry_on_transient_error(
                         raise
             
             # Should not reach here, but satisfy type checker
-            if last_exception:
+            if last_exception:  # pragma: no cover
                 raise last_exception
-            raise RuntimeError("Unexpected retry loop exit")
+            raise RuntimeError("Unexpected retry loop exit")  # pragma: no cover
         
         return wrapper
     return decorator
