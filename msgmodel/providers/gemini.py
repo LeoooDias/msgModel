@@ -365,6 +365,141 @@ class GeminiProvider:
             raise
         except Exception as e:
             raise StreamingError(f"Streaming interrupted: {e}", chunks_received=chunks_received)
+
+    def stream_with_finish_reason(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        file_data: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        on_chunk: Optional[Callable[[str], bool]] = None
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Make a streaming API call to Gemini, yielding chunks and finish_reason.
+        
+        Similar to stream(), but yields dictionaries with chunk text and metadata,
+        including the final finish_reason when the stream completes.
+        
+        Args:
+            prompt: The user prompt
+            system_instruction: Optional system instruction
+            file_data: Optional file data dict
+            timeout: Timeout in seconds for the streaming connection (default: 300s/5min)
+            on_chunk: Optional callback that receives each chunk. Return False to abort stream.
+            
+        Yields:
+            Dict with keys:
+            - "type": "delta" for text chunks, "finish" for completion
+            - "text": The text content (for delta events)
+            - "finish_reason": The finish reason (for finish events)
+              Values: "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER", or None
+            
+        Raises:
+            APIError: If the API call fails
+            StreamingError: If streaming fails or timeout occurs
+        """
+        url = self._build_url(stream=True)
+        payload = self._build_payload(prompt, system_instruction, file_data)
+        headers = {"Content-Type": MIME_TYPE_JSON}
+        
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                data=json.dumps(payload),
+                stream=True,
+                timeout=timeout
+            )
+        except requests.Timeout:
+            raise StreamingError(f"Gemini streaming request timed out after {timeout} seconds")
+        except requests.RequestException as e:
+            raise APIError(f"Request failed: {e}")
+        
+        if not response.ok:
+            raise APIError(
+                f"Gemini API error: {response.text}",
+                status_code=response.status_code,
+                response_text=response.text
+            )
+        
+        chunks_received = 0
+        sample_chunks = []
+        finish_reason = None
+        
+        try:
+            for line in response.iter_lines():
+                if line:
+                    line_text = line.decode("utf-8")
+                    if line_text.startswith("data: "):
+                        data = line_text[6:]
+                        try:
+                            chunk = json.loads(data)
+                            
+                            if len(sample_chunks) < 3:
+                                sample_chunks.append(chunk)
+                            
+                            # Check for error in stream
+                            if "error" in chunk and isinstance(chunk.get("error"), dict):
+                                error_obj = chunk["error"]
+                                error_msg = error_obj.get("message", "Unknown error")
+                                error_code = error_obj.get("code", None)
+                                error_status = error_obj.get("status", "UNKNOWN")
+                                
+                                if (error_status == "RESOURCE_EXHAUSTED" or 
+                                    "rate" in error_msg.lower() or
+                                    "quota" in error_msg.lower()):
+                                    raise APIError(
+                                        f"Gemini rate limit/quota exceeded during streaming: {error_msg}",
+                                        status_code=429,
+                                        response_text=json.dumps(chunk),
+                                        provider="gemini"
+                                    )
+                                else:
+                                    raise APIError(
+                                        f"Gemini API error during streaming ({error_status}): {error_msg}",
+                                        status_code=error_code,
+                                        response_text=json.dumps(chunk),
+                                        provider="gemini"
+                                    )
+                            
+                            # Extract finish_reason from candidates
+                            for candidate in chunk.get("candidates", []):
+                                if "finishReason" in candidate and candidate["finishReason"]:
+                                    finish_reason = candidate["finishReason"]
+                            
+                            text = self.extract_text(chunk)
+                            if text:
+                                chunks_received += 1
+                                if on_chunk is not None:
+                                    should_continue = on_chunk(text)
+                                    if should_continue is False:
+                                        yield {"type": "finish", "finish_reason": "aborted"}
+                                        return
+                                yield {"type": "delta", "text": text}
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Yield finish event with final finish_reason
+            yield {"type": "finish", "finish_reason": finish_reason}
+            
+            if chunks_received == 0:
+                error_msg = (
+                    "No text chunks extracted from Gemini streaming response. "
+                    "Response format may not match Gemini API streaming response structure "
+                    "or stream may have ended prematurely."
+                )
+                if sample_chunks:
+                    error_msg += f"\n\nSample chunks received (for debugging):\n"
+                    for i, chunk in enumerate(sample_chunks, 1):
+                        error_msg += f"  Chunk {i}: {json.dumps(chunk)}\n"
+                
+                raise StreamingError(error_msg, chunks_received=0)
+        except StreamingError:
+            raise
+        except APIError:
+            raise
+        except Exception as e:
+            raise StreamingError(f"Streaming interrupted: {e}", chunks_received=chunks_received)
     
     @staticmethod
     def extract_text(response: Dict[str, Any]) -> str:

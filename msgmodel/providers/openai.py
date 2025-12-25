@@ -371,6 +371,145 @@ class OpenAIProvider:
             raise
         except Exception as e:
             raise StreamingError(f"Streaming interrupted: {e}", chunks_received=chunks_received)
+
+    def stream_with_finish_reason(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        file_data: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        on_chunk: Optional[Callable[[str], bool]] = None
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Make a streaming API call to OpenAI, yielding chunks and finish_reason.
+        
+        Similar to stream(), but yields dictionaries with chunk text and metadata,
+        including the final finish_reason when the stream completes.
+        
+        Args:
+            prompt: The user prompt
+            system_instruction: Optional system instruction
+            file_data: Optional file data dict
+            timeout: Timeout in seconds for the streaming connection (default: 300s/5min)
+            on_chunk: Optional callback that receives each chunk. Return False to abort stream.
+            
+        Yields:
+            Dict with keys:
+            - "type": "delta" for text chunks, "finish" for completion
+            - "text": The text content (for delta events)
+            - "finish_reason": The finish reason (for finish events)
+              Values: "stop", "length", "content_filter", "tool_calls", or None
+            
+        Raises:
+            APIError: If the API call fails
+            StreamingError: If streaming fails or timeout occurs
+        """
+        payload = self._build_payload(prompt, system_instruction, file_data, stream=True)
+        headers = self._build_headers()
+        
+        try:
+            response = requests.post(
+                OPENAI_URL,
+                headers=headers,
+                data=json.dumps(payload),
+                stream=True,
+                timeout=timeout
+            )
+        except requests.Timeout:
+            raise StreamingError(f"OpenAI streaming request timed out after {timeout} seconds")
+        except requests.RequestException as e:
+            raise APIError(f"Request failed: {e}")
+        
+        if not response.ok:
+            raise APIError(
+                f"OpenAI API error: {response.text}",
+                status_code=response.status_code,
+                response_text=response.text
+            )
+        
+        chunks_received = 0
+        sample_chunks = []
+        finish_reason = None
+        
+        try:
+            for line in response.iter_lines():
+                if line:
+                    line_text = line.decode("utf-8")
+                    if line_text.startswith("data: "):
+                        data = line_text[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            
+                            if len(sample_chunks) < 3:
+                                sample_chunks.append(chunk)
+                            
+                            # Check for error in stream
+                            if "error" in chunk and isinstance(chunk.get("error"), dict):
+                                error_obj = chunk["error"]
+                                error_msg = error_obj.get("message", "Unknown error")
+                                error_type = error_obj.get("type", "unknown")
+                                
+                                if error_type == "rate_limit_error" or "rate_limit" in error_msg.lower():
+                                    raise APIError(
+                                        f"OpenAI rate limit exceeded during streaming: {error_msg}",
+                                        status_code=429,
+                                        response_text=json.dumps(chunk),
+                                        provider="openai"
+                                    )
+                                else:
+                                    raise APIError(
+                                        f"OpenAI API error during streaming ({error_type}): {error_msg}",
+                                        status_code=None,
+                                        response_text=json.dumps(chunk),
+                                        provider="openai"
+                                    )
+                            
+                            # Extract text and finish_reason from OpenAI streaming response
+                            if "choices" in chunk and isinstance(chunk["choices"], list):
+                                for choice in chunk["choices"]:
+                                    if isinstance(choice, dict):
+                                        # Capture finish_reason when present
+                                        if "finish_reason" in choice and choice["finish_reason"]:
+                                            finish_reason = choice["finish_reason"]
+                                        
+                                        delta = choice.get("delta", {})
+                                        if isinstance(delta, dict):
+                                            text = delta.get("content", "")
+                                            if text:
+                                                chunks_received += 1
+                                                if on_chunk is not None:
+                                                    should_continue = on_chunk(text)
+                                                    if should_continue is False:
+                                                        # Yield finish with abort reason
+                                                        yield {"type": "finish", "finish_reason": "aborted"}
+                                                        return
+                                                yield {"type": "delta", "text": text}
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Yield finish event with final finish_reason
+            yield {"type": "finish", "finish_reason": finish_reason}
+            
+            if chunks_received == 0:
+                error_msg = (
+                    "No text chunks extracted from OpenAI streaming response. "
+                    "Response format may not match OpenAI Chat Completions delta structure "
+                    "or stream may have ended prematurely."
+                )
+                if sample_chunks:
+                    error_msg += f"\n\nSample chunks received (for debugging):\n"
+                    for i, chunk in enumerate(sample_chunks, 1):
+                        error_msg += f"  Chunk {i}: {json.dumps(chunk)}\n"
+                
+                raise StreamingError(error_msg, chunks_received=0)
+        except StreamingError:
+            raise
+        except APIError:
+            raise
+        except Exception as e:
+            raise StreamingError(f"Streaming interrupted: {e}", chunks_received=chunks_received)
     
     @staticmethod
     def extract_text(response: Dict[str, Any]) -> str:

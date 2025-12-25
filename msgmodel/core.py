@@ -36,6 +36,7 @@ from .exceptions import (
     AuthenticationError,
     FileError,
     APIError,
+    StreamingError,
 )
 from .providers.openai import OpenAIProvider
 from .providers.gemini import GeminiProvider
@@ -542,3 +543,216 @@ def stream(
     else:
         # Should never reach here due to Provider enum, but maintain type safety
         raise ConfigurationError(f"Unsupported provider: {provider}")  # pragma: no cover
+
+
+def stream_panels(
+    provider: Union[str, Provider],
+    prompt: str,
+    api_key: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    file_like: Optional[io.BytesIO] = None,
+    filename: Optional[str] = None,
+    config: Optional[ProviderConfig] = None,
+    max_tokens: Optional[int] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    timeout: float = 300,
+    panel_id: Optional[str] = None,
+) -> Iterator[Dict[str, Any]]:
+    """
+    Stream a response from an LLM provider with structured panel events.
+    
+    This function yields structured events suitable for building chat UIs.
+    Events include text deltas, final content with metadata, and the
+    finish_reason for detecting truncation.
+    
+    Args:
+        provider: The LLM provider ('openai', 'gemini', 'anthropic', or 'o', 'g', 'a')
+        prompt: The user prompt text
+        api_key: API key (optional if set via env var or file)
+        system_instruction: Optional system instruction/prompt
+        file_like: Optional file-like object (io.BytesIO) - must be seekable.
+        filename: Optional filename hint for MIME type detection when using file_like.
+        config: Optional provider-specific configuration object
+        max_tokens: Override for max tokens (convenience parameter)
+        model: Override for model (convenience parameter)
+        temperature: Override for temperature (convenience parameter)
+        timeout: Timeout in seconds for streaming connection (default: 300s/5min)
+        panel_id: Optional identifier for this panel (auto-generated if not provided)
+    
+    Yields:
+        Event dictionaries with the following structures:
+        
+        panel_delta event (text chunk):
+            {
+                "event": "panel_delta",
+                "panel_id": str,
+                "delta": str  # The text chunk
+            }
+        
+        panel_final event (stream complete):
+            {
+                "event": "panel_final",
+                "panel_id": str,
+                "content": str,  # Full accumulated response text
+                "privacy": dict,  # Privacy metadata from provider
+                "finish_reason": str | None  # Raw provider finish reason
+            }
+        
+        panel_error event (error occurred):
+            {
+                "event": "panel_error",
+                "panel_id": str,
+                "error": str,
+                "error_type": str
+            }
+    
+    Finish Reason Values by Provider:
+        - OpenAI: "stop", "length", "content_filter", "tool_calls"
+        - Anthropic: "end_turn", "max_tokens", "stop_sequence"
+        - Gemini: "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER"
+        
+        Truncation indicators (response cut off due to token limit):
+        - OpenAI: "length"
+        - Anthropic: "max_tokens"
+        - Gemini: "MAX_TOKENS"
+    
+    Raises:
+        ConfigurationError: For invalid configuration
+        AuthenticationError: For API key issues
+        FileError: For file-related issues
+    
+    Note:
+        API errors during streaming are yielded as panel_error events
+        rather than raised as exceptions.
+    
+    Examples:
+        >>> # Stream with panel events
+        >>> for event in stream_panels("openai", "Tell me a story", max_tokens=50):
+        ...     if event["event"] == "panel_delta":
+        ...         print(event["delta"], end="", flush=True)
+        ...     elif event["event"] == "panel_final":
+        ...         if event["finish_reason"] == "length":
+        ...             print("\\n[Response truncated due to max_tokens]")
+        ...         print(f"\\nFinish reason: {event['finish_reason']}")
+        
+        >>> # Check for truncation
+        >>> events = list(stream_panels("anthropic", "Write a long essay", max_tokens=100))
+        >>> final = next(e for e in events if e["event"] == "panel_final")
+        >>> if final["finish_reason"] == "max_tokens":
+        ...     print("Warning: Response was truncated!")
+    """
+    import uuid
+    
+    # Generate panel_id if not provided
+    if panel_id is None:
+        panel_id = str(uuid.uuid4())[:8]
+    
+    # Normalize provider
+    if isinstance(provider, str):
+        provider = Provider.from_string(provider)
+    
+    # Get or create config
+    if config is None:
+        config = get_default_config(provider)
+    
+    # Get API key: prioritize explicit api_key param, then config.api_key, then env/file
+    config_api_key = getattr(config, 'api_key', None)
+    key = _get_api_key(provider, api_key or config_api_key)
+    
+    # Apply convenience overrides
+    if max_tokens is not None:
+        _validate_max_tokens(max_tokens)
+        config.max_tokens = max_tokens
+    if model is not None:
+        config.model = model
+    if temperature is not None:
+        config.temperature = temperature
+    
+    # Prepare file data if provided
+    file_data = None
+    if file_like:
+        file_hint = filename or getattr(file_like, 'name', 'upload.bin')
+        file_data = _prepare_file_like_data(file_like, filename=file_hint)
+    
+    # Accumulate content for panel_final
+    accumulated_content = []
+    privacy_metadata = None
+    finish_reason = None
+    
+    try:
+        # Create provider instance and stream with finish_reason
+        if provider == Provider.OPENAI:
+            assert isinstance(config, OpenAIConfig)
+            prov = OpenAIProvider(key, config)
+            privacy_metadata = prov.get_privacy_info()
+            
+            for event in prov.stream_with_finish_reason(prompt, system_instruction, file_data, timeout=timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+                    
+        elif provider == Provider.GEMINI:
+            assert isinstance(config, GeminiConfig)
+            prov = GeminiProvider(key, config)
+            privacy_metadata = prov.get_privacy_info()
+            
+            for event in prov.stream_with_finish_reason(prompt, system_instruction, file_data, timeout=timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+        
+        elif provider == Provider.ANTHROPIC:
+            assert isinstance(config, AnthropicConfig)
+            prov = AnthropicProvider(key, config)
+            privacy_metadata = prov.get_privacy_info()
+            
+            for event in prov.stream_with_finish_reason(prompt, system_instruction, file_data, timeout=timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+        
+        else:
+            raise ConfigurationError(f"Unsupported provider: {provider}")
+        
+        # Yield final panel event with finish_reason
+        yield {
+            "event": "panel_final",
+            "panel_id": panel_id,
+            "content": "".join(accumulated_content),
+            "privacy": privacy_metadata,
+            "finish_reason": finish_reason
+        }
+        
+    except (APIError, StreamingError) as e:
+        yield {
+            "event": "panel_error",
+            "panel_id": panel_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+    except Exception as e:
+        yield {
+            "event": "panel_error",
+            "panel_id": panel_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }

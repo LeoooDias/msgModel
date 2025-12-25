@@ -34,11 +34,11 @@ Async support (requires aiohttp):
     >>> asyncio.run(main())
 """
 
-__version__ = "4.0.1"
+__version__ = "4.1.0"
 __author__ = "Leo Dias"
 
 # Core API
-from .core import query, stream, LLMResponse
+from .core import query, stream, stream_panels, LLMResponse
 
 # Configuration
 from .config import (
@@ -96,9 +96,14 @@ from .security import RequestSigner
 # Async support (v3.2.6) - lazy import to avoid requiring aiohttp
 def __getattr__(name: str):
     """Lazy import for async functions to avoid requiring aiohttp."""
-    if name in ("aquery", "astream"):
-        from .async_core import aquery, astream
-        return aquery if name == "aquery" else astream
+    if name in ("aquery", "astream", "astream_panels"):
+        from .async_core import aquery, astream, astream_panels
+        if name == "aquery":
+            return aquery
+        elif name == "astream":
+            return astream
+        else:
+            return astream_panels
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -107,10 +112,12 @@ __all__ = [
     # Core API
     "query",
     "stream",
+    "stream_panels",
     "LLMResponse",
     # Async API (v3.2.6)
     "aquery",
     "astream",
+    "astream_panels",
     # Configuration
     "Provider",
     "OpenAIConfig",

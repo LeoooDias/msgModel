@@ -478,3 +478,386 @@ async def _astream_gemini(
                             yield text
                     except json.JSONDecodeError:
                         continue
+
+
+async def astream_panels(
+    provider: Union[str, Provider],
+    prompt: str,
+    api_key: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    file_like: Optional[io.BytesIO] = None,
+    filename: Optional[str] = None,
+    config: Optional[ProviderConfig] = None,
+    max_tokens: Optional[int] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    timeout: float = 300,
+    panel_id: Optional[str] = None,
+) -> AsyncIterator[Dict[str, Any]]:
+    """
+    Async version of stream_panels() - stream responses with structured panel events.
+    
+    This function yields structured events suitable for building async chat UIs.
+    Events include text deltas, final content with metadata, and the
+    finish_reason for detecting truncation.
+    
+    Args:
+        provider: The LLM provider ('openai', 'gemini', 'anthropic', or 'o', 'g', 'a')
+        prompt: The user prompt text
+        api_key: API key (optional if set via env var or file)
+        system_instruction: Optional system instruction/prompt
+        file_like: Optional file-like object (io.BytesIO)
+        filename: Optional filename hint for MIME type detection
+        config: Optional provider-specific configuration object
+        max_tokens: Override for max tokens
+        model: Override for model
+        temperature: Override for temperature
+        timeout: Request timeout in seconds (default: 300)
+        panel_id: Optional identifier for this panel (auto-generated if not provided)
+    
+    Yields:
+        Event dictionaries with the following structures:
+        
+        panel_delta event (text chunk):
+            {
+                "event": "panel_delta",
+                "panel_id": str,
+                "delta": str  # The text chunk
+            }
+        
+        panel_final event (stream complete):
+            {
+                "event": "panel_final",
+                "panel_id": str,
+                "content": str,  # Full accumulated response text
+                "privacy": dict,  # Privacy metadata from provider
+                "finish_reason": str | None  # Raw provider finish reason
+            }
+        
+        panel_error event (error occurred):
+            {
+                "event": "panel_error",
+                "panel_id": str,
+                "error": str,
+                "error_type": str
+            }
+    
+    Finish Reason Values by Provider:
+        - OpenAI: "stop", "length", "content_filter", "tool_calls"
+        - Anthropic: "end_turn", "max_tokens", "stop_sequence"
+        - Gemini: "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER"
+        
+        Truncation indicators (response cut off due to token limit):
+        - OpenAI: "length"
+        - Anthropic: "max_tokens"
+        - Gemini: "MAX_TOKENS"
+    
+    Raises:
+        ImportError: If aiohttp is not installed
+        ConfigurationError: For invalid configuration
+        AuthenticationError: For API key issues
+        FileError: For file-related issues
+    
+    Example:
+        >>> import asyncio
+        >>> from msgmodel.async_core import astream_panels
+        >>> 
+        >>> async def main():
+        ...     async for event in astream_panels("openai", "Tell me a story", max_tokens=50):
+        ...         if event["event"] == "panel_delta":
+        ...             print(event["delta"], end="", flush=True)
+        ...         elif event["event"] == "panel_final":
+        ...             if event["finish_reason"] == "length":
+        ...                 print("\\n[Response truncated]")
+        >>> 
+        >>> asyncio.run(main())
+    """
+    import uuid
+    
+    _ensure_aiohttp()
+    
+    # Generate panel_id if not provided
+    if panel_id is None:
+        panel_id = str(uuid.uuid4())[:8]
+    
+    # Normalize provider
+    if isinstance(provider, str):
+        provider = Provider.from_string(provider)
+    
+    # Get API key
+    key = _get_api_key(provider, api_key)
+    
+    # Get or create config
+    if config is None:
+        config = get_default_config(provider)
+    
+    # Apply convenience overrides
+    if max_tokens is not None:
+        _validate_max_tokens(max_tokens)
+        config.max_tokens = max_tokens
+    if model is not None:
+        config.model = model
+    if temperature is not None:
+        config.temperature = temperature
+    
+    # Prepare file data if provided
+    file_data = None
+    if file_like:
+        file_hint = filename or getattr(file_like, 'name', 'upload.bin')
+        file_data = _prepare_file_like_data(file_like, filename=file_hint)
+    
+    # Accumulate content for panel_final
+    accumulated_content = []
+    privacy_metadata = None
+    finish_reason = None
+    
+    try:
+        if provider == Provider.OPENAI:
+            async for event in _astream_panels_openai(key, prompt, system_instruction, file_data, config, timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+                    privacy_metadata = event.get("privacy")
+                    
+        elif provider == Provider.GEMINI:
+            async for event in _astream_panels_gemini(key, prompt, system_instruction, file_data, config, timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+                    privacy_metadata = event.get("privacy")
+        
+        elif provider == Provider.ANTHROPIC:
+            async for event in _astream_panels_anthropic(key, prompt, system_instruction, file_data, config, timeout):
+                if event["type"] == "delta":
+                    accumulated_content.append(event["text"])
+                    yield {
+                        "event": "panel_delta",
+                        "panel_id": panel_id,
+                        "delta": event["text"]
+                    }
+                elif event["type"] == "finish":
+                    finish_reason = event.get("finish_reason")
+                    privacy_metadata = event.get("privacy")
+        
+        else:
+            raise ConfigurationError(f"Unsupported provider: {provider}")
+        
+        # Yield final panel event with finish_reason
+        yield {
+            "event": "panel_final",
+            "panel_id": panel_id,
+            "content": "".join(accumulated_content),
+            "privacy": privacy_metadata,
+            "finish_reason": finish_reason
+        }
+        
+    except (APIError, StreamingError) as e:
+        yield {
+            "event": "panel_error",
+            "panel_id": panel_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+    except Exception as e:
+        yield {
+            "event": "panel_error",
+            "panel_id": panel_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
+async def _astream_panels_openai(
+    api_key: str,
+    prompt: str,
+    system_instruction: Optional[str],
+    file_data: Optional[Dict[str, Any]],
+    config: OpenAIConfig,
+    timeout: float,
+) -> AsyncIterator[Dict[str, Any]]:
+    """Make async streaming request to OpenAI with finish_reason support."""
+    from .providers.openai import OpenAIProvider
+    
+    prov = OpenAIProvider(api_key, config)
+    payload = prov._build_payload(prompt, system_instruction, file_data, stream=True)
+    headers = prov._build_headers()
+    privacy_metadata = prov.get_privacy_info()
+    finish_reason = None
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            OPENAI_URL,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            if not response.ok:
+                text = await response.text()
+                raise APIError(
+                    f"OpenAI API error: {text}",
+                    status_code=response.status,
+                    response_text=text,
+                    provider="openai",
+                )
+            
+            async for line in response.content:
+                line_text = line.decode("utf-8").strip()
+                if line_text.startswith("data: "):
+                    data = line_text[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        if "choices" in chunk:
+                            for choice in chunk["choices"]:
+                                # Capture finish_reason
+                                if "finish_reason" in choice and choice["finish_reason"]:
+                                    finish_reason = choice["finish_reason"]
+                                
+                                delta = choice.get("delta", {})
+                                text = delta.get("content", "")
+                                if text:
+                                    yield {"type": "delta", "text": text}
+                    except json.JSONDecodeError:
+                        continue
+    
+    yield {"type": "finish", "finish_reason": finish_reason, "privacy": privacy_metadata}
+
+
+async def _astream_panels_gemini(
+    api_key: str,
+    prompt: str,
+    system_instruction: Optional[str],
+    file_data: Optional[Dict[str, Any]],
+    config: GeminiConfig,
+    timeout: float,
+) -> AsyncIterator[Dict[str, Any]]:
+    """Make async streaming request to Gemini with finish_reason support."""
+    from .providers.gemini import GeminiProvider
+    
+    # PRIVACY CRITICAL: Verify paid API access before making any request
+    await asyncio.get_event_loop().run_in_executor(
+        None, _verify_gemini_billing_sync, api_key, config
+    )
+    
+    prov = GeminiProvider.create_with_cached_validation(api_key, config, verified=True)
+    
+    url = prov._build_url(stream=True)
+    payload = prov._build_payload(prompt, system_instruction, file_data)
+    headers = {"Content-Type": "application/json"}
+    privacy_metadata = prov.get_privacy_info()
+    finish_reason = None
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            if not response.ok:
+                text = await response.text()
+                raise APIError(
+                    f"Gemini API error: {text}",
+                    status_code=response.status,
+                    response_text=text,
+                    provider="gemini",
+                )
+            
+            async for line in response.content:
+                line_text = line.decode("utf-8").strip()
+                if line_text.startswith("data: "):
+                    data = line_text[6:]
+                    try:
+                        chunk = json.loads(data)
+                        
+                        # Extract finish_reason from candidates
+                        for candidate in chunk.get("candidates", []):
+                            if "finishReason" in candidate and candidate["finishReason"]:
+                                finish_reason = candidate["finishReason"]
+                        
+                        text = prov.extract_text(chunk)
+                        if text:
+                            yield {"type": "delta", "text": text}
+                    except json.JSONDecodeError:
+                        continue
+    
+    yield {"type": "finish", "finish_reason": finish_reason, "privacy": privacy_metadata}
+
+
+async def _astream_panels_anthropic(
+    api_key: str,
+    prompt: str,
+    system_instruction: Optional[str],
+    file_data: Optional[Dict[str, Any]],
+    config: AnthropicConfig,
+    timeout: float,
+) -> AsyncIterator[Dict[str, Any]]:
+    """Make async streaming request to Anthropic with finish_reason support."""
+    from .providers.anthropic import AnthropicProvider
+    
+    prov = AnthropicProvider(api_key, config)
+    payload = prov._build_payload(prompt, system_instruction, file_data, stream=True)
+    headers = prov._build_headers()
+    privacy_metadata = prov.get_privacy_info()
+    finish_reason = None
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            ANTHROPIC_URL,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            if not response.ok:
+                text = await response.text()
+                raise APIError(
+                    f"Anthropic API error: {text}",
+                    status_code=response.status,
+                    response_text=text,
+                    provider="anthropic",
+                )
+            
+            async for line in response.content:
+                line_text = line.decode("utf-8").strip()
+                if line_text.startswith("data: "):
+                    data = line_text[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        event_type = chunk.get("type", "")
+                        
+                        # Capture stop_reason from message_delta
+                        if event_type == "message_delta":
+                            delta = chunk.get("delta", {})
+                            if "stop_reason" in delta and delta["stop_reason"]:
+                                finish_reason = delta["stop_reason"]
+                        
+                        # Extract text from content_block_delta
+                        if event_type == "content_block_delta":
+                            delta = chunk.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                if text:
+                                    yield {"type": "delta", "text": text}
+                        
+                        if event_type == "message_stop":
+                            break
+                            
+                    except json.JSONDecodeError:
+                        continue
+    
+    yield {"type": "finish", "finish_reason": finish_reason, "privacy": privacy_metadata}
